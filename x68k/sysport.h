@@ -1,12 +1,15 @@
-#ifndef _winx68k_sysport
-#define _winx68k_sysport
+#ifndef _WINX68K_SYSPORT_H
+#define _WINX68K_SYSPORT_H
 
+#include <stdint.h>
 #include "common.h"
 
-extern	BYTE	SysPort[7];
+extern	uint8_t	SysPort[7];
 
 void SysPort_Init(void);
-BYTE FASTCALL SysPort_Read(DWORD adr);
-void FASTCALL SysPort_Write(DWORD adr, BYTE data);
+int  SysPort_HRL(void); /* $E8E007 bit 1: dot clock divider set */
+uint8_t FASTCALL SysPort_Read(uint32_t adr);
+void FASTCALL SysPort_Write(uint32_t adr, uint8_t data);
+int SysPort_StateAction(StateMem *sm, int load, int data_only);
 
-#endif
+#endif /* _WINX68K_SYSPORT_H */

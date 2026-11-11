@@ -1,11 +1,12 @@
-#ifndef _winx68k_irqh
-#define _winx68k_irqh
+#ifndef _WINX68K_IRQ_H
+#define _WINX68K_IRQ_H
 
+#include <stdint.h>
 #include "common.h"
 
 void IRQH_Init(void);
-DWORD FASTCALL IRQH_DefaultVector(BYTE irq);
-void IRQH_IRQCallBack(BYTE irq);
-void IRQH_Int(BYTE irq, void* handler);
+void IRQH_IRQCallBack(uint8_t irq);
+void IRQH_Int(uint8_t irq, void* handler);
+int IRQH_StateAction(StateMem *sm, int load, int data_only);
 
-#endif
+#endif /* WINX68K_IRQ_H */

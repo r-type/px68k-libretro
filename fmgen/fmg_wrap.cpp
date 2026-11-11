@@ -1,17 +1,9 @@
-// ciscタンノエロガゾウキボンヌを強引にけろぴーに繋ぐための
-// extern "C" の入れ方がきちゃなくてステキ（ぉ
-
-// readme.txtに従って、改変点：
-//  - opna.cppにYMF288用のクラス追加してます。OPNAそのまんまだけどね（ほんとは正しくないがまあいいや）
-//  - 多分他は弄ってないはず……
-
 extern "C" {
 
 #include "common.h"
 #include "winx68k.h"
 #include "dswin.h"
 #include "prop.h"
-#include "juliet.h"
 #include "mfp.h"
 #include "adpcm.h"
 #include "mercury.h"
@@ -20,33 +12,24 @@ extern "C" {
 
 #include "opm.h"
 #include "opna.h"
-
-
-#define RMBUFSIZE (256*1024)
-
-typedef struct {
-	unsigned int time;
-	int reg;
-	BYTE data;
-} RMDATA;
-
 };
-
-static RMDATA RMData[RMBUFSIZE];
-static int RMPtrW;
-static int RMPtrR;
 
 class MyOPM : public FM::OPM
 {
 public:
 	MyOPM();
 	virtual ~MyOPM() {}
-	void WriteIO(DWORD adr, BYTE data);
-	void Count2(DWORD clock);
+	void WriteIO(uint32_t adr, uint8_t data);
+	void Count2(uint32_t clock);
+
 private:
 	virtual void Intr(bool);
+
+public:
 	int CurReg;
-	DWORD CurCount;
+	uint32_t CurCount;
+
+	int StateAction(StateMem *sm, int load, int data_only);
 };
 
 
@@ -55,37 +38,34 @@ MyOPM::MyOPM()
 	CurReg = 0;
 }
 
-void MyOPM::WriteIO(DWORD adr, BYTE data)
+int MyOPM::StateAction(StateMem *sm, int load, int data_only)
 {
-	if( adr&1 ) {
+	SFORMAT StateRegs[] =
+	{
+		SFVARN(CurReg, "CurReg"),
+		SFVARN(CurCount, "CurCount"),
+
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "MYOPM", false);
+	ret &= FM::OPM::StateAction(sm, load, data_only);
+
+	return(1);
+}
+
+void MyOPM::WriteIO(uint32_t adr, uint8_t data)
+{
+	if( adr&1 )
+	{
 		if ( CurReg==0x1b ) {
 			::ADPCM_SetClock((data>>5)&4);
 			::FDC_SetForceReady((data>>6)&1);
 		}
 		SetReg((int)CurReg, (int)data);
-		if ( (juliet_YM2151IsEnable())&&(Config.SoundROMEO) ) {
-			int newptr = (RMPtrW+1)%RMBUFSIZE;
-			if ( newptr!=RMPtrR ) {
-#if 0
-				RMData[RMPtrW].time = timeGetTime();
-				RMData[RMPtrW].reg  = CurReg;
-if ( CurReg==0x14 ) data &= 0xf3;	// Int Enableはマスクする
-				RMData[RMPtrW].data = data;
-				RMPtrW = newptr;
-			}
-#else
-				OPM_RomeoOut(Config.BufferSize*5);
-			}
-			RMData[RMPtrW].time = timeGetTime();
-			RMData[RMPtrW].reg  = CurReg;
-if ( CurReg==0x14 ) data &= 0xf3;	// Int Enableはマスクする
-			RMData[RMPtrW].data = data;
-			RMPtrW = newptr;
-#endif
-		}
-	} else {
-		CurReg = (int)data;
 	}
+	else
+		CurReg = (int)data;
 }
 
 void MyOPM::Intr(bool f)
@@ -93,116 +73,82 @@ void MyOPM::Intr(bool f)
 	if ( f ) ::MFP_Int(12);
 }
 
-
-void MyOPM::Count2(DWORD clock)
+void MyOPM::Count2(uint32_t clock)
 {
 	CurCount += clock;
 	Count(CurCount/10);
 	CurCount %= 10;
 }
 
-
 static MyOPM* opm = NULL;
 
-int OPM_Init(int clock, int rate)
+int OPM_StateAction(StateMem *sm, int load, int data_only)
 {
-	juliet_load();
-	juliet_prepare();
+	if (opm)
+		return opm->StateAction(sm, load, data_only);
 
-	RMPtrW = RMPtrR = 0;
-	memset(RMData, 0, sizeof(RMData));
+	return 1;
+}
 
+int OPM_Init(int clock)
+{
 	opm = new MyOPM();
-	if ( !opm ) return FALSE;
-	if ( !opm->Init(clock, rate, TRUE) ) {
+	if ( !opm ) return 0;
+	if ( !opm->Init(clock, 44100) ) {
 		delete opm;
 		opm = NULL;
-		return FALSE;
+		return 0;
 	}
-	return TRUE;
+	return 1;
 }
 
 
 void OPM_Cleanup(void)
 {
-	juliet_YM2151Reset();
-	juliet_unload();
 	delete opm;
 	opm = NULL;
 }
 
-
-void OPM_SetRate(int clock, int rate)
-{
-	if ( opm ) opm->SetRate(clock, rate, TRUE);
-}
-
-
 void OPM_Reset(void)
 {
-	RMPtrW = RMPtrR = 0;
-	memset(RMData, 0, sizeof(RMData));
-
 	if ( opm ) opm->Reset();
-	juliet_YM2151Reset();
 }
 
 
-BYTE FASTCALL OPM_Read(WORD adr)
+uint8_t FASTCALL OPM_Read(void)
 {
-	BYTE ret = 0;
-	(void)adr;
-	if ( opm ) ret = opm->ReadStatus();
-	if ( (juliet_YM2151IsEnable())&&(Config.SoundROMEO) ) {
-		int newptr = (RMPtrW+1)%RMBUFSIZE;
-		ret = (ret&0x7f)|((newptr==RMPtrR)?0x80:0x00);
-	}
-	return ret;
+	if ( opm ) return opm->ReadStatus();
+	return 0;
 }
 
 
-void FASTCALL OPM_Write(DWORD adr, BYTE data)
+void FASTCALL OPM_Write(uint32_t adr, uint8_t data)
 {
 	if ( opm ) opm->WriteIO(adr, data);
 }
 
 
-void OPM_Update(short *buffer, int length, int rate, BYTE *pbsp, BYTE *pbep)
+void OPM_Update(int16_t *buffer, int length, uint8_t *pbsp, uint8_t *pbep)
 {
-	if ( (!juliet_YM2151IsEnable())||(!Config.SoundROMEO) )
-		if ( opm ) opm->Mix((FM::Sample*)buffer, length, rate, pbsp, pbep);
+	if ( opm ) opm->Mix((int16_t*)buffer, length, pbsp, pbep);
 }
 
 
-void FASTCALL OPM_Timer(DWORD step)
+void FASTCALL OPM_Timer(uint32_t step)
 {
 	if ( opm ) opm->Count2(step);
 }
 
 
-void OPM_SetVolume(BYTE vol)
+void OPM_SetVolume(uint8_t vol)
 {
 	int v = (vol)?((16-vol)*4):192;		// このくらいかなぁ
 	if ( opm ) opm->SetVolume(-v);
 }
 
 
-void OPM_RomeoOut(unsigned int delay)
-{
-	unsigned int t = timeGetTime();
-	if ( (juliet_YM2151IsEnable())&&(Config.SoundROMEO) ) {
-		while ( RMPtrW!=RMPtrR ) {
-			if ( (t-RMData[RMPtrR].time)>=delay ) {
-				juliet_YM2151W(RMData[RMPtrR].reg, RMData[RMPtrR].data);
-				RMPtrR = (RMPtrR+1)%RMBUFSIZE;
-			} else
-				break;
-		}
-	}
-}
-
 // ----------------------------------------------------------
-// ---------------------------- YMF288 (満開版ま〜きゅり〜)
+// ---------------------------- YMF288 (満開版ま~きゅり~)
 // ----------------------------------------------------------
 // TODO : ROMEOの288を叩くの
 
@@ -211,14 +157,14 @@ class YMF288 : public FM::Y288
 public:
 	YMF288();
 	virtual ~YMF288() {}
-	void WriteIO(DWORD adr, BYTE data);
-	BYTE ReadIO(DWORD adr);
-	void Count2(DWORD clock);
+	void WriteIO(uint32_t adr, uint8_t data);
+	uint8_t ReadIO(uint32_t adr);
+	void Count2(uint32_t clock);
 	void SetInt(int f) { IntrFlag = f; };
 private:
 	virtual void Intr(bool);
 	int CurReg[2];
-	DWORD CurCount;
+	uint32_t CurCount;
 	int IntrFlag;
 };
 
@@ -229,61 +175,54 @@ YMF288::YMF288()
 	IntrFlag = 0;
 }
 
-void YMF288::WriteIO(DWORD adr, BYTE data)
+void YMF288::WriteIO(uint32_t adr, uint8_t data)
 {
-	if( adr&1 ) {
+	if( adr&1 )
 		SetReg(((adr&2)?(CurReg[1]+0x100):CurReg[0]), (int)data);
-	} else {
+   else
 		CurReg[(adr>>1)&1] = (int)data;
-	}
 }
 
 
-BYTE YMF288::ReadIO(DWORD adr)
+uint8_t YMF288::ReadIO(uint32_t adr)
 {
-	BYTE ret = 0;
-	if ( adr&1 ) {
-		ret = GetReg(((adr&2)?(CurReg[1]+0x100):CurReg[0]));
-	} else {
-		ret = ((adr)?(ReadStatusEx()):(ReadStatus()));
-	}
-	return ret;
+	if ( adr&1 )
+		return GetReg(((adr&2)?(CurReg[1]+0x100):CurReg[0]));
+   return ((adr)?(ReadStatusEx()):(ReadStatus()));
 }
-
 
 void YMF288::Intr(bool f)
 {
-	if ( (f)&&(IntrFlag) ) ::Mcry_Int();
+   if ( (f)&&(IntrFlag) )
+      ::Mcry_Int();
 }
 
 
-void YMF288::Count2(DWORD clock)
+void YMF288::Count2(uint32_t clock)
 {
 	CurCount += clock;
 	Count(CurCount/10);
 	CurCount %= 10;
 }
 
-
 static YMF288* ymf288a = NULL;
 static YMF288* ymf288b = NULL;
 
-
-int M288_Init(int clock, int rate, const char* path)
+int M288_Init(int clock, const char* path)
 {
 	ymf288a = new YMF288();
 	ymf288b = new YMF288();
-	if ( (!ymf288a)||(!ymf288b) ) {
-		M288_Cleanup();
-		return FALSE;
-	}
-	if ( (!ymf288a->Init(clock, rate, TRUE, path))||(!ymf288b->Init(clock, rate, TRUE, path)) ) {
-		M288_Cleanup();
-		return FALSE;
-	}
+	if ( (!ymf288a)||(!ymf288b) )
+      goto error;
+   if ( (!ymf288a->Init(clock, 44100, path))||(!ymf288b->Init(clock, 44100, path)) )
+      goto error;
 	ymf288a->SetInt(1);
 	ymf288b->SetInt(0);
-	return TRUE;
+	return 1;
+
+error:
+   M288_Cleanup();
+   return 0;
 }
 
 
@@ -294,14 +233,6 @@ void M288_Cleanup(void)
 	ymf288a = ymf288b = NULL;
 }
 
-
-void M288_SetRate(int clock, int rate)
-{
-	if ( ymf288a ) ymf288a->SetRate(clock, rate, TRUE);
-	if ( ymf288b ) ymf288b->SetRate(clock, rate, TRUE);
-}
-
-
 void M288_Reset(void)
 {
 	if ( ymf288a ) ymf288a->Reset();
@@ -309,47 +240,52 @@ void M288_Reset(void)
 }
 
 
-BYTE FASTCALL M288_Read(WORD adr)
+uint8_t FASTCALL M288_Read(uint16_t adr)
 {
-	if ( adr<=3 ) {
+	if ( adr<=3 )
+   {
 		if ( ymf288a )
 			return ymf288a->ReadIO(adr);
-		else
-			return 0;
-	} else {
+	}
+   else
+   {
 		if ( ymf288b )
 			return ymf288b->ReadIO(adr&3);
-		else
-			return 0;
+	}
+   return 0;
+}
+
+
+void FASTCALL M288_Write(uint32_t adr, uint8_t data)
+{
+	if ( adr<=3 )
+   {
+      if ( ymf288a )
+         ymf288a->WriteIO(adr, data);
+	}
+   else
+   {
+		if ( ymf288b )
+         ymf288b->WriteIO(adr&3, data);
 	}
 }
 
 
-void FASTCALL M288_Write(DWORD adr, BYTE data)
+void M288_Update(int16_t *buffer, size_t length)
 {
-	if ( adr<=3 ) {
-		if ( ymf288a ) ymf288a->WriteIO(adr, data);
-	} else {
-		if ( ymf288b ) ymf288b->WriteIO(adr&3, data);
-	}
+	if ( ymf288a ) ymf288a->Mix((int16_t*)buffer, length);
+	if ( ymf288b ) ymf288b->Mix((int16_t*)buffer, length);
 }
 
 
-void M288_Update(short *buffer, int length)
-{
-	if ( ymf288a ) ymf288a->Mix((FM::Sample*)buffer, length);
-	if ( ymf288b ) ymf288b->Mix((FM::Sample*)buffer, length);
-}
-
-
-void FASTCALL M288_Timer(DWORD step)
+void FASTCALL M288_Timer(uint32_t step)
 {
 	if ( ymf288a ) ymf288a->Count2(step);
 	if ( ymf288b ) ymf288b->Count2(step);
 }
 
 
-void M288_SetVolume(BYTE vol)
+void M288_SetVolume(uint8_t vol)
 {
 	int v1 = (vol)?((16-vol)*4-24):192;		// このくらいかなぁ
 	int v2 = (vol)?((16-vol)*4):192;		// 少し小さめに

@@ -1,180 +1,94 @@
-// ---------------------------------------------------------------------------------------
-//  IRQH.C - IRQ Handler (架空のデバイスにょ)
-// ---------------------------------------------------------------------------------------
+/*
+ *  IRQH.C - IRQ Handler
+ */
 
 #include "common.h"
 #include "../m68000/m68000.h"
 #include "irqh.h"
-#ifdef CYCLONE
+
+#if defined (HAVE_CYCLONE)
 extern struct Cyclone m68k;
-typedef signed int  FASTCALL C68K_INT_CALLBACK(signed int level);
-
 #endif
-	BYTE	IRQH_IRQ[8];
-	void	*IRQH_CallBack[8];
+typedef int32_t  FASTCALL C68K_INT_CALLBACK(int32_t level);
 
-// -----------------------------------------------------------------------
-//   初期化
-// -----------------------------------------------------------------------
-void IRQH_Init(void)
+static uint8_t	IRQH_IRQ[8];
+static void	*IRQH_CallBack[8];
+
+int IRQH_StateAction(StateMem *sm, int load, int data_only)
 {
-	ZeroMemory(IRQH_IRQ, 8);
+	SFORMAT StateRegs[] = 
+	{
+		SFARRAY(IRQH_IRQ, 8),
+
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_IRQH", false);
+
+	return ret;
 }
 
+void IRQH_Init(void)
+{
+	memset(IRQH_IRQ, 0, 8);
+}
 
-// -----------------------------------------------------------------------
-//   デフォルトのベクタを返す（これが起こったら変だお）
-// -----------------------------------------------------------------------
-DWORD FASTCALL IRQH_DefaultVector(BYTE irq)
+static uint32_t FASTCALL IRQH_DefaultVector(uint8_t irq)
 {
 	IRQH_IRQCallBack(irq);
 	return -1;
 }
 
 
-// -----------------------------------------------------------------------
-//   他の割り込みのチェック
-//   各デバイスのベクタを返すルーチンから呼ばれます
-// -----------------------------------------------------------------------
-void IRQH_IRQCallBack(BYTE irq)
+void IRQH_IRQCallBack(uint8_t irq)
 {
-#if 0
 	int i;
-	IRQH_IRQ[irq] = 0;
-	C68k_Set_IRQ(&C68K, 0);
-	for (i=7; i>0; i--)
-	{
-		if (IRQH_IRQ[i])
-		{
-			C68k_Set_IRQ_Callback(&C68K, IRQH_CallBack[i]);
-			C68k_Set_IRQ(&C68K, i); // xxx 
-			if ( C68K.ICount) {					// 多重割り込み時（CARAT）
-				m68000_ICountBk += C68K.ICount;		// 強制的に割り込みチェックをさせる
-				C68K.ICount = 0;				// 苦肉の策 ^^;
-			}
-			break;
-		}
-	}
-#endif
 	IRQH_IRQ[irq&7] = 0;
-int i;
-	#ifdef CYCLONE
-	m68k.irq =0;
-	#else
-C68k_Set_IRQ(&C68K, 0);
-	#endif
-	for (i=7; i>0; i--)
-	{
-	    if (IRQH_IRQ[i])
-	    {
-#ifdef CYCLONE
 
-	m68k.irq = i;
+m68000_set_irq_line(0, CLEAR_LINE);
 
-	#else
-		C68k_Set_IRQ(&C68K, i);
-#endif
-		return;
-	    }
-	}
-
-}
-
-// -----------------------------------------------------------------------
-//   割り込み発生
-// -----------------------------------------------------------------------
-void IRQH_Int(BYTE irq, void* handler)
-{
-#if 0
-    int i;
-	IRQH_IRQ[irq] = 1;
-	if (handler==NULL)
-		IRQH_CallBack[irq] = &IRQH_DefaultVector;
-	else
-		IRQH_CallBack[irq] = handler;
 	for (i=7; i>0; i--)
 	{
 		if (IRQH_IRQ[i])
 		{
-                        C68k_Set_IRQ_Callback(&C68K, IRQH_CallBack[i]);
-                        C68k_Set_IRQ(&C68K, i, HOLD_LINE); //xxx
-			if ( C68K.ICount ) {					// 多重割り込み時（CARAT）
-				m68000_ICountBk += C68K.ICount;		// 強制的に割り込みチェックをさせる
-				C68K.ICount = 0;				// 苦肉の策 ^^;
-			}
+m68000_set_irq_line(i, HOLD_LINE);
 			return;
 		}
 	}
-#endif
-#if 1
-	int i;
-	IRQH_IRQ[irq&7] = 1;
-	if (handler==NULL)
-	    IRQH_CallBack[irq&7] = &IRQH_DefaultVector;
-	else
-	    IRQH_CallBack[irq&7] = handler;
-	for (i=7; i>0; i--)
-	{
-	    if (IRQH_IRQ[i])
-	    {
-#ifdef CYCLONE
-
-	m68k.irq = i;
-
-	#else
-		C68k_Set_IRQ(&C68K, i);
-#endif
-		return;
-	    }
-	}
-#endif
-#if 0
-	int i;
-	IRQH_IRQ[irq&7] = 1;
-	if (handler==NULL)
-	    IRQH_CallBack[irq&7] = &IRQH_DefaultVector;
-	else
-	    IRQH_CallBack[irq&7] = handler;
-	C68k_Set_IRQ(&C68K, irq&7);
-#endif
 }
 
-signed int  my_irqh_callback(signed int  level)
+void IRQH_Int(uint8_t irq, void* handler)
 {
-#if 0
-    int i;
-    int vect = -1;
-    for (i=7; i>0; i--)
-    {
-	if (IRQH_IRQ[i])
+	int i;
+	IRQH_IRQ[irq&7] = 1;
+	if (handler==NULL)
+		IRQH_CallBack[irq&7] = &IRQH_DefaultVector;
+	else
+		IRQH_CallBack[irq&7] = handler;
+	for (i=7; i>0; i--)
 	{
-	    IRQH_IRQ[level&7] = 0;
-	    C68K_INT_CALLBACK *func = IRQH_CallBack[i];
-	    vect = (func)(level&7);
-	    break;
+		if (IRQH_IRQ[i])
+		{
+m68000_set_irq_line(i, HOLD_LINE);
+			return;
+		}
 	}
-    }
-#endif
+}
 
-    int i;
-    C68K_INT_CALLBACK *func = IRQH_CallBack[level&7];
-    int vect = (func)(level&7);
-    //printf("irq vect = %x line = %d\n", vect, level);
+int32_t my_irqh_callback(int32_t level)
+{
+   int i;
+   C68K_INT_CALLBACK *func = IRQH_CallBack[level&7];
+   int vect = (func)(level&7);
 
-    for (i=7; i>0; i--)
-    {
-	if (IRQH_IRQ[i])
-	{
-	#ifdef CYCLONE
+   for (i=7; i>0; i--)
+   {
+      if (IRQH_IRQ[i])
+      {
+m68000_set_irq_line(i, HOLD_LINE);
+         break;
+      }
+   }
 
-	m68k.irq = i;
-	    break;
-	#else
-	    C68k_Set_IRQ(&C68K, i);
-	    break;
-	#endif
-	}
-    }
-
-    return (signed int )vect;
+   return (int32_t)vect;
 }

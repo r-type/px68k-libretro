@@ -23,7 +23,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include	"windows.h"
+#include        <stdint.h>
 #include	"common.h"
 #include	"dswin.h"
 #include	"prop.h"
@@ -31,224 +31,133 @@
 #include	"mercury.h"
 #include	"fmg_wrap.h"
 
-#include "libretro.h"
-extern retro_audio_sample_batch_t audio_batch_cb;
-extern signed short soundbuf[1024*2];
-
-short	playing = FALSE;
-
 #define PCMBUF_SIZE 2*2*48000
-BYTE pcmbuffer[PCMBUF_SIZE];
-BYTE *pcmbufp = pcmbuffer;
-BYTE *pbsp = pcmbuffer;
-BYTE *pbrp = pcmbuffer, *pbwp = pcmbuffer;
-BYTE *pbep = &pcmbuffer[PCMBUF_SIZE];
-DWORD ratebase = 22050;
-long DSound_PreCounter = 0;
-BYTE rsndbuf[PCMBUF_SIZE];
 
-int audio_fd = 1;
+static uint8_t pcmbuffer[PCMBUF_SIZE];
+/* Stereo signed 16-bit PCM; occupancy is counted in frames. */
+#define PCM_CAPACITY (PCMBUF_SIZE / 4)
+static int pcm_read = 0, pcm_write = 0, pcm_count = 0;
+static int32_t snd_precounter = 0;
 
-void raudio_callback(void *userdata, unsigned char *stream, int len);
+uint8_t *pbsp = pcmbuffer;
+uint8_t *pbrp = pcmbuffer, *pbwp = pcmbuffer;
+uint8_t *pbep = &pcmbuffer[PCMBUF_SIZE];
 
-#ifndef NOSOUND
+/* Audio is produced from emulated time and consumed once per frame, so the
+ * two rates are equal and a rounding step can leave a frame one sample short,
+ * which is played as silence (a click).  Start with a few frames of silence
+ * already queued so that jitter has somewhere to go (~0.7 ms of latency). */
+#define AUDIO_CUSHION_FRAMES 32
 
-int
-DSound_Init(unsigned long rate, unsigned long buflen)
+void audio_buffer_reset(void)
 {
-	DWORD samples;
-
-	if (playing)
-		return FALSE;
-
-	if (rate == 0)
-   {
-		audio_fd = -1;
-		return TRUE;
-	}
-
-	ratebase = rate;
-
-	samples = 2048;
-
-	playing = TRUE;
-	return TRUE;
+   pcm_read = 0;
+   pcm_write = pcm_count = AUDIO_CUSHION_FRAMES;
+   pbrp = pbsp;
+   pbwp = pbsp + pcm_write * 4;
+   memset(pcmbuffer, 0, sizeof(pcmbuffer));
 }
 
-void
-DSound_Play(void)
+int dswin_StateAction(StateMem *sm, int load, int data_only)
 {
-   //	if (audio_fd >= 0);
+   SFORMAT StateRegs[] = { SFVAR(snd_precounter), SFEND };
+   int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs,
+                                 "X68K_DSND", false);
+   if (load && ret)
+      audio_buffer_reset();
+   return ret;
 }
 
-void
-DSound_Stop(void)
+void DSound_Play(void)
 {
-   //	if (audio_fd >= 0);
+	ADPCM_SetVolume((uint8_t)Config.PCM_VOL);
+	OPM_SetVolume((uint8_t)Config.OPM_VOL);	
 }
 
-int
-DSound_Cleanup(void)
+void DSound_Stop(void)
 {
-	playing = FALSE;
-
-	if (audio_fd >= 0)
-		audio_fd = -1;
-
-	return TRUE;
+	ADPCM_SetVolume(0);
+	OPM_SetVolume(0);	
 }
 
+/* The synthesizers accept a wrapping buffer. Never hand them more than
+ * the contiguous writable span, and never overwrite unread PCM. */
 static void sound_send(int length)
 {
-   int rate = 0;
-
-   ADPCM_Update((short *)pbwp, length, rate, pbsp, pbep);
-   OPM_Update((short *)pbwp, length, rate, pbsp, pbep);
-#ifndef	NO_MERCURY
-   //Mcry_Update((short *)pcmbufp, length);
-#endif
-
-   pbwp += length * sizeof(WORD) * 2;
-   if (pbwp >= pbep)
-      pbwp = pbsp + (pbwp - pbep);
-}
-
-void FASTCALL DSound_Send0(long clock)
-{
-	int length = 0;
-	int rate;
-
-	if (audio_fd < 0)
-		return;
-
-	DSound_PreCounter += (ratebase * clock);
-
-	while (DSound_PreCounter >= 10000000L)
+   while (length > 0)
    {
-		length++;
-		DSound_PreCounter -= 10000000L;
-	}
-
-	if (length == 0)
-		return;
-
-	sound_send(length);
-}
-
-static void FASTCALL DSound_Send(int length)
-{
-	int rate;
-
-	if (audio_fd < 0)
-		return;
-	sound_send(length);
-}
-
-void
-raudio_callback(void *userdata, unsigned char *stream, int len)
-{
-   int lena, lenb, datalen, rate;
-   BYTE *buf;
-
-cb_start:
-   if (pbrp <= pbwp)
-   {
-      // pcmbuffer
-      // +---------+-------------+----------+
-      // |         |/////////////|          |
-      // +---------+-------------+----------+
-      // A         A<--datalen-->A          A
-      // |         |             |          |
-      // pbsp     pbrp          pbwp       pbep
-
-      datalen = pbwp - pbrp;
-
-      // needs more data
-      if (datalen < len)
-         DSound_Send((len - datalen) / 4);
-
-#if 0
-      datalen = pbwp - pbrp;
-      if (datalen < len)
-         printf("xxxxx not enough sound data xxxxx\n");
-#endif
-
-      // change to TYPEC or TYPED
-      if (pbrp > pbwp)
-         goto cb_start;
-
-      buf = pbrp;
-      pbrp += len;
-      //printf("TYPEA: ");
-   }
-   else
-   {
-      // pcmbuffer
-      // +---------+-------------+----------+
-      // |/////////|             |//////////|
-      // +------+--+-------------+----------+
-      // <-lenb->  A             <---lena--->
-      // A         |             A          A
-      // |         |             |          |
-      // pbsp     pbwp          pbrp       pbep
-
-      lena = pbep - pbrp;
-      if (lena >= len)
+      int n = PCM_CAPACITY - pcm_write;
+      int free_frames = PCM_CAPACITY - pcm_count;
+      if (n > length) n = length;
+      if (n > free_frames) n = free_frames;
+      if (n == 0)
       {
-         buf = pbrp;
-         pbrp += len;
-         //printf("TYPEC: ");
+         /* Preserve emulator time when producer outruns consumer. */
+         int drop = length;
+         if (drop > pcm_count) drop = pcm_count;
+         pcm_read = (pcm_read + drop) % PCM_CAPACITY;
+         pcm_count -= drop;
+         pbrp = pbsp + pcm_read * 4;
+         continue;
       }
-      else
-      {
-         lenb = len - lena;
-
-         if (pbwp - pbsp < lenb)
-            DSound_Send((lenb - (pbwp - pbsp)) / 4);
-
-#if 0
-         if (pbwp - pbsp < lenb)
-            printf("xxxxx not enough sound data xxxxx\n");
-#endif
-         memcpy(rsndbuf, pbrp, lena);
-         memcpy(&rsndbuf[lena], pbsp, lenb);
-         buf = rsndbuf;
-         pbrp = pbsp + lenb;
-         //printf("TYPED: ");
-      }
+      ADPCM_Update((int16_t *)(pbsp + pcm_write * 4), n, pbsp, pbep);
+      OPM_Update((int16_t *)(pbsp + pcm_write * 4), n, pbsp, pbep);
+      pcm_write = (pcm_write + n) % PCM_CAPACITY;
+      pcm_count += n;
+      pbwp = pbsp + pcm_write * 4;
+      length -= n;
    }
-
-   signed short int *ptr=(signed short int *)buf;
-   memcpy(&soundbuf[0],buf,len);
-   audio_batch_cb(soundbuf,len/4);
-
 }
 
-#else	/* NOSOUND */
-int
-DSound_Init(unsigned long rate, unsigned long buflen)
+void DSound_Send0(int32_t clock)
 {
-	return FALSE;
+   int length = 0;
+   snd_precounter += (44100 * clock);
+   while (snd_precounter >= 10000000L)
+   {
+      length++;
+      snd_precounter -= 10000000L;
+   }
+   if (length > 0) sound_send(length);
 }
 
-void
-DSound_Play(void)
+int audio_samples_avail(void)
 {
+   return pcm_count;
 }
 
-void
-DSound_Stop(void)
+void audio_samples_discard(int discard)
 {
+   if (discard <= 0) return;
+   if (discard > pcm_count) discard = pcm_count;
+   pcm_read = (pcm_read + discard) % PCM_CAPACITY;
+   pcm_count -= discard;
+   pbrp = pbsp + pcm_read * 4;
 }
 
-int
-DSound_Cleanup(void)
+void raudio_callback(void *userdata, unsigned char *stream, int len)
 {
-	return TRUE;
+   uint8_t *out = (uint8_t *)userdata;
+   int frames, n;
+   (void)stream;
+   if (!out || len <= 0) return;
+   /* Callers supply stereo frames. Handle any malformed byte remainder. */
+   frames = len / 4;
+   while (frames > 0)
+   {
+      /* Never advance synthesizers to satisfy frontend demand.
+       * Only emulated CPU time may produce sound. Missing audio is silence. */
+      if (pcm_count == 0)
+         break;
+      n = PCM_CAPACITY - pcm_read;
+      if (n > pcm_count) n = pcm_count;
+      if (n > frames) n = frames;
+      if (n <= 0) break;
+      memcpy(out, pbsp + pcm_read * 4, n * 4);
+      out += n * 4;
+      audio_samples_discard(n);
+      frames -= n;
+   }
+   if (frames > 0) memset(out, 0, frames * 4);
+   if (len & 3) memset((uint8_t *)userdata + (len & ~3), 0, len & 3);
 }
-
-void FASTCALL
-DSound_Send0(long clock)
-{
-}
-#endif	/* !NOSOUND */

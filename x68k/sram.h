@@ -1,16 +1,19 @@
-#ifndef _winx68k_sram
-#define _winx68k_sram
+#ifndef _WINX68K_SRAM_H
+#define _WINX68K_SRAM_H
 
 #include "common.h"
 
-extern	BYTE	SRAM[0x4000];
+extern	uint8_t	SRAM[0x4000];
 
 void SRAM_Init(void);
 void SRAM_Cleanup(void);
 void SRAM_VirusCheck(void);
 
-BYTE FASTCALL SRAM_Read(DWORD adr);
-void FASTCALL SRAM_Write(DWORD adr, BYTE data);
+void SRAM_UpdateBoot(void);
+void SRAM_WriteEnable(int enable);
 
-#endif
+uint8_t FASTCALL SRAM_Read(uint32_t adr);
+void FASTCALL SRAM_Write(uint32_t adr, uint8_t data);
+int SRAM_StateAction(StateMem *sm, int load, int data_only);
 
+#endif /* _WINX68K_SRAM_H */

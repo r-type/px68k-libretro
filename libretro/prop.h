@@ -1,66 +1,51 @@
-#ifndef _winx68k_config
-#define _winx68k_config
+#ifndef _WINX68K_CONFIG_H
+#define _WINX68K_CONFIG_H
 
+#include <stdint.h>
 #include "common.h"
 
 typedef struct
 {
-	DWORD SampleRate;
-	DWORD BufferSize;
-	int WinPosX;
-	int WinPosY;
+	uint32_t BufferSize;
 	int OPM_VOL;
 	int PCM_VOL;
 	int MCR_VOL;
-	int JOY_BTN[2][8];
-	int MouseSpeed;
 	int WindowFDDStat;
-	int FullScrFDDStat;
-	int DSAlert;
 	int MIDI_SW;
 	int MIDI_Type;
 	int MIDI_Reset;
-	int JoyKey;
-	int JoyKeyReverse;
-	int JoyKeyJoy2;
-	int SRAMWarning;
 	char HDImage[16][MAX_PATH];
 	int ToneMap;
 	char ToneMapFile[MAX_PATH];
 	int XVIMode;
-	int JoySwap;
-	int LongFileName;
-	int WinDrvFD;
-	int WinStrech;
-	int DSMixing;
-	int CDROM_ASPI;
-	int CDROM_ASPI_Drive;
-	int CDROM_IOCTRL_Drive;
-	int CDROM_SCSIID;
-	int CDROM_Enable;
-	int SSTP_Enable;
-	int SSTP_Port;
 	int Sound_LPF;
 	int SoundROMEO;
 	int MIDIDelay;
 	int MIDIAutoDelay;
 	char FDDImage[2][MAX_PATH];
-	int VkeyScale;
-	int VbtnSwap;
-	int JoyOrMouse;
-	int HwJoyAxis[2];
-	int HwJoyHat;
-	int HwJoyBtn[8];
+	int Joy2Mouse;
 	int NoWaitMode;
-	BYTE FrameRate;
+	uint8_t FrameRate;
+	int AdjustFrameRates;
+	int AudioDesyncHack;
+	int MenuFontSize; /* font size of menu, 0 = normal, 1 = large */
+	int MenuLinesJump; /* Left/Right navigation step, 5 to 50 */
+	int save_fdd_path;
+	int save_hdd_path;
+	/* Cpu clock in MHz */
+	int clockmhz;
+	/* RAM Size = size * 1024 * 1024 */
+	int ram_size;
+	/* Emulated controller type selected through RetroPad subclasses. */
+	int JOY_TYPE[2];
 } Win68Conf;
 
 extern Win68Conf Config;
 
 void LoadConfig(void);
 void SaveConfig(void);
+void SaveConfigBeforeUnload(void);
+void ResetConfigSaveState(void);
 void PropPage_Init(void);
 
-int set_modulepath(char *path, size_t len);
-
-#endif //_winx68k_config
+#endif /* _WINX68K_CONFIG_H */

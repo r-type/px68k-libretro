@@ -1,9 +1,11 @@
 #ifndef _winx68k_cdrom
 #define _winx68k_cdrom
 
+#include <stdint.h>
 #include "common.h"
 
-typedef struct {
+typedef struct
+{
 	unsigned char reserved;
 	unsigned char adr;
 	unsigned char trackno;
@@ -11,7 +13,8 @@ typedef struct {
 	unsigned char addr[4];
 } TOCENTRY;
 
-typedef struct {
+typedef struct
+{
 	unsigned char size[2];
 	unsigned char first;
 	unsigned char last;
@@ -20,10 +23,10 @@ typedef struct {
 
 void CDROM_Init(void);
 void CDROM_Cleanup(void);
-BYTE FASTCALL CDROM_Read(DWORD adr);
-void FASTCALL CDROM_Write(DWORD adr, BYTE data);
+uint8_t FASTCALL CDROM_Read(uint32_t adr);
+void FASTCALL CDROM_Write(uint32_t adr, uint8_t data);
 
-extern BYTE CDROM_ASPIChecked;
+extern uint8_t CDROM_ASPIChecked;
 
 #endif
 

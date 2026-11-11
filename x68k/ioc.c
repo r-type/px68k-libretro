@@ -1,46 +1,48 @@
-// ---------------------------------------------------------------------------------------
-//  IOC.C - I/O Controller
-// ---------------------------------------------------------------------------------------
+/*
+ *  IOC.C - I/O Controller
+ */
 
 #include "common.h"
 #include "ioc.h"
 
-	BYTE	IOC_IntStat = 0;
-	BYTE	IOC_IntVect = 0;
+uint8_t	IOC_IntStat = 0;
+uint8_t	IOC_IntVect = 0;
 
+int IOC_StateAction(StateMem *sm, int load, int data_only)
+{
+	SFORMAT StateRegs[] = 
+	{
+		SFVAR(IOC_IntStat),
+		SFVAR(IOC_IntVect),
 
-// -----------------------------------------------------------------------
-//   初期化〜
-// -----------------------------------------------------------------------
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_IOC", false);
+
+	return ret;
+}
+
 void IOC_Init(void)
 {
 	IOC_IntStat = 0;
 	IOC_IntVect = 0;
 }
 
-
-// -----------------------------------------------------------------------
-//   りーど
-// -----------------------------------------------------------------------
-BYTE FASTCALL IOC_Read(DWORD adr)
+uint8_t FASTCALL IOC_Read(uint32_t adr)
 {
 	if (adr==0xe9c001)
 		return IOC_IntStat;
-	else
-		return 0xff;
+	return 0xff;
 }
 
-
-// -----------------------------------------------------------------------
-//   らいと
-// -----------------------------------------------------------------------
-void FASTCALL IOC_Write(DWORD adr, BYTE data)
+void FASTCALL IOC_Write(uint32_t adr, uint8_t data)
 {
 	if (adr==0xe9c001)
 	{
 		IOC_IntStat &= 0xf0;
 		IOC_IntStat |= data&0x0f;
 	}
-	if (adr==0xe9c003)
+	else if (adr==0xe9c003)
 		IOC_IntVect = (data&0xfc);
 }

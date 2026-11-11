@@ -1,9 +1,10 @@
-#ifndef winx1_timer_h
-#define winx1_timer_h
+#ifndef _WINXL_TIMER_H
+#define _WINXL_TIMER_H
+
+extern uint32_t tick;
+extern uint32_t timercnt;
 
 void Timer_Init(void);
-void Timer_Reset(void);
-WORD Timer_GetCount(void);
-void Timer_SetCount(WORD);
+uint16_t Timer_GetCount(void);
 
-#endif //winx1_timer_h
+#endif /* _WINXL_TIMER_H */

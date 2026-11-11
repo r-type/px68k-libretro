@@ -1,8 +1,8 @@
-// ---------------------------------------------------------------------------------------
-//  FDC.C - Floppy Disk Controller (uPD72065)
-//  ToDo : 未実装コマンド、胡散臭い部分（多数）の見直し、DMACとの連携部の見直し
-//    D88でのエラー処理とかマシになったはず……でもその分汚い……
-// ---------------------------------------------------------------------------------------
+/*
+ *  FDC.C - Floppy Disk Controller (uPD72065)
+ *  ToDo: Review of unimplemented commands, suspicious parts (numerous), review of the link with DMAC
+ *    The error handling in D88 should have gotten better... but it's also messy...
+ */
 
 #include "fdc.h"
 #include "fdd.h"
@@ -10,54 +10,54 @@
 #include "irqh.h"
 #include "dmac.h"
 #include "m68000.h"
-#include "fileio.h"
+#include "../libretro/dosio.h"
 #include "winx68k.h"
 
-static const BYTE CMD_TABLE[32] = {0, 0, 8, 2, 1, 8, 8, 1, 0, 8, 1, 0, 8, 5, 0, 2,
+static const uint8_t CMD_TABLE[32] = {0, 0, 8, 2, 1, 8, 8, 1, 0, 8, 1, 0, 8, 5, 0, 2,
                                    0, 8, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0};
-static const BYTE DAT_TABLE[32] = {0, 0, 7, 0, 1, 7, 7, 0, 2, 7, 7, 0, 7, 7, 0, 0,
+static const uint8_t DAT_TABLE[32] = {0, 0, 7, 0, 1, 7, 7, 0, 2, 7, 7, 0, 7, 7, 0, 0,
                                    0, 7, 0, 0, 1, 0, 0, 0, 0, 7, 0, 0, 0, 7, 0, 0};
 
 /*  Params for Read / ReadDel / ReadDiag / Write / WriteDel / ScanEq / ScanLEq / ScanHEq  */
 typedef struct {
-	BYTE cmd;
-	BYTE us;
-	BYTE c;
-	BYTE h;
-	BYTE r;
-	BYTE n;
-	BYTE eot;
-	BYTE gsl;
-	BYTE dtl;
+	uint8_t cmd;
+	uint8_t us;
+	uint8_t c;
+	uint8_t h;
+	uint8_t r;
+	uint8_t n;
+	uint8_t eot;
+	uint8_t gsl;
+	uint8_t dtl;
 } FDCPRM0;
 
 /*  Params for ReadID / Seek / SenseDevStat */
 typedef struct {
-	BYTE cmd;
-	BYTE us;
-	BYTE n;
+	uint8_t cmd;
+	uint8_t us;
+	uint8_t n;
 } FDCPRM1;
 
 /*  Params for WriteID  */
 typedef struct {
-	BYTE cmd;
-	BYTE us;
-	BYTE n;
-	BYTE sc;
-	BYTE gap;
-	BYTE d;
+	uint8_t cmd;
+	uint8_t us;
+	uint8_t n;
+	uint8_t sc;
+	uint8_t gap;
+	uint8_t d;
 } FDCPRM2;
 
 
 /*  Response for many commands  */
 typedef struct {
-	BYTE st0;
-	BYTE st1;
-	BYTE st2;
-	BYTE c;
-	BYTE h;
-	BYTE r;
-	BYTE n;
+	uint8_t st0;
+	uint8_t st1;
+	uint8_t st2;
+	uint8_t c;
+	uint8_t h;
+	uint8_t r;
+	uint8_t n;
 } FDCRSP;
 
 
@@ -78,13 +78,47 @@ typedef struct {
 	int st0;
 	int st1;
 	int st2;
-	BYTE RspBuf[10];
-	BYTE PrmBuf[10];
-	BYTE DataBuf[0x8000];
-	BYTE ScanBuf[0x8000];
+	uint8_t RspBuf[10];
+	uint8_t PrmBuf[10];
+	uint8_t DataBuf[0x8000];
+	uint8_t ScanBuf[0x8000];
 } FDC;
 
 static FDC fdc;
+
+int FDC_StateAction(StateMem *sm, int load, int data_only)
+{
+	SFORMAT StateRegs[] = 
+	{
+		SFVAR(fdc.cmd),
+
+		SFVAR(fdc.cyl),
+		SFVAR(fdc.drv),
+		SFVAR(fdc.ready),
+		SFVAR(fdc.ctrl),
+		SFVAR(fdc.wexec),
+
+		SFVAR(fdc.rdptr),
+		SFVAR(fdc.wrptr),
+		SFVAR(fdc.rdnum),
+		SFVAR(fdc.wrnum),
+		SFVAR(fdc.bufnum),
+		SFVAR(fdc.st0),
+		SFVAR(fdc.st1),
+		SFVAR(fdc.st2),
+
+		SFARRAY(fdc.RspBuf, 10),
+		SFARRAY(fdc.PrmBuf, 10),
+		SFARRAY(fdc.DataBuf, 0x8000),
+		SFARRAY(fdc.ScanBuf, 0x8000),
+
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_FDC", false);
+
+	return ret;
+}
 
 
 #define US(p) (p->us&3)
@@ -93,22 +127,14 @@ static FDC fdc;
 #define MF(p) ((p->us>>6)&1)
 #define MT(p) ((p->us>>7)&1)
 
-// -----------------------------------------------------------------------
-//   割り込みベクタ
-// -----------------------------------------------------------------------
-DWORD FASTCALL FDC_Int(BYTE irq)
+uint32_t FASTCALL FDC_Int(uint8_t irq)
 {
 	IRQH_IRQCallBack(irq);
 	if (irq==1)
-		return ((DWORD)IOC_IntVect);
-	else
-		return -1;
+		return ((uint32_t)IOC_IntVect);
+	return -1;
 }
 
-
-// -----------------------------------------------------------------------
-//   初期化
-// -----------------------------------------------------------------------
 void FDC_Init(void)
 {
 	memset(&fdc, 0, sizeof(FDC));
@@ -128,10 +154,10 @@ static void FDC_SetInt(void)
 }
 
 
-// -----------------------------------------------------------------------
-//   Excution Phase の終了
-// -----------------------------------------------------------------------
-void FDC_EPhaseEnd(void)
+/*
+ *   End of Execution Phase
+ */
+static void FDC_EPhaseEnd(void)
 {
 	FDCID id;
 	FDCRSP* rsp = (FDCRSP*)fdc.RspBuf;
@@ -166,14 +192,9 @@ static void FDC_ExecCmd(void)
 	FDCID id;
 	int ret;
 
-/*{
-FILE* fp = fopen("_fdc.txt", "a");
-fprintf(fp, "Cmd:%d  CurCy:%d  \n", fdc.cmd, fdc.cyl);
-fclose(fp);
-}*/
 
 	switch ( fdc.cmd ) {
-	case 2:		// ReadDiagnostic
+	case 2:		/* ReadDiagnostic */
 		fdc.st0 = prm1->us&7;
 		if ( (FDD_IsReady(fdc.drv))||(fdc.ready) ) {
 			if ( !FDD_Seek(fdc.drv, (fdc.cyl<<1)+HD(prm0), &id) ) {
@@ -203,23 +224,18 @@ fclose(fp);
 		}
 		if ( fdc.st0&0x40 ) FDC_EPhaseEnd();
 		break;
-	case 3:		// Specify
+	case 3:		/* Specify */
 		/* Nothing to do */
 		break;
-	case 4:		// SenseDeviceStatus
+	case 4:		/* SenseDeviceStatus */
 		fdc.st0 = prm1->us&7;
 		rsp->st0 = fdc.st0;
 		if ( !fdc.cyl )                            rsp->st0 |= 0x10;
 		if ( (FDD_IsReady(fdc.drv))||(fdc.ready) ) rsp->st0 |= 0x20;
 		if ( FDD_IsReadOnly(fdc.drv) )             rsp->st0 |= 0x40;
-/*{
-FILE* fp = fopen("_fdc.txt", "a");
-fprintf(fp, "  ### SDS  Ret=$%02X\n", rsp->st0);
-fclose(fp);
-}*/
 		break;
-	case 5:		// WriteData
-	case 9:		// WriteDeletedData
+	case 5:		/* WriteData */
+	case 9:		/* WriteDeletedData */
 		fdc.st0 = prm1->us&7;
 		if ( FDD_IsReadOnly(fdc.drv) ) {
 			fdc.st0 |= 0x40;
@@ -237,11 +253,11 @@ fclose(fp);
 		}
 		if ( fdc.st0&0x40 ) FDC_EPhaseEnd();
 		break;
-	case 6:		// ReadData
-	case 12:	// ReadDeletedData
-	case 17:	// ScanEqual
-	case 25:	// ScanLowOrEqual
-	case 29:	// ScanHighOrEqual
+	case 6:		/* ReadData */
+	case 12:	/* ReadDeletedData */
+	case 17:	/* ScanEqual */
+	case 25:	/* ScanLowOrEqual */
+	case 29:	/* ScanHighOrEqual */
 		fdc.st0 = prm1->us&7;
 		if ( (FDD_IsReady(fdc.drv))||(fdc.ready) ) {
 			if ( !FDD_Seek(fdc.drv, (fdc.cyl<<1)+HD(prm0), &id) ) {
@@ -273,30 +289,25 @@ fclose(fp);
 			fdc.st0 |= 0x48;
 		}
 		if ( fdc.st0&0x40 ) FDC_EPhaseEnd();
-/*{
-FILE* fp = fopen("_fdc.txt", "a");
-fprintf(fp, "  ### Read  C:$%02X H:$%02X R:$%02X N:$%02X  EOT=$%02X  ret=$%02X/$%02X/$%02X\n", id.c, id.h, id.r, id.n, prm0->eot, fdc.st0, fdc.st1, fdc.st2);
-fclose(fp);
-}*/
 		break;
-	case 7:		// Recalibrate
+	case 7:		/* Recalibrate */
 		fdc.st0 = prm1->us&7;
 		fdc.cyl = 0;
 		if ( (!FDD_IsReady(fdc.drv))&&(!fdc.ready) ) {
-			fdc.st0 |= 0x48;		// FDなし
+			fdc.st0 |= 0x48;		/* no FD */
 		} else if ( (fdc.drv>=0)&&(fdc.drv<2) ) {
-			fdc.st0 |= 0x20;		// FDあり、ドライブあり
+			fdc.st0 |= 0x20;		/* with FD and drive */
 		} else {
-			fdc.st0 |= 0x50;		// ドライブなし
+			fdc.st0 |= 0x50;		/* no drive */
 		}
 		FDC_SetInt();
 		break;
-	case 8:		// SenseIntStatus
+	case 8:		/* SenseIntStatus */
 		rsp->st0 = fdc.st0;
 		rsp->st1 = fdc.cyl;
 		fdc.st0 = 0x80;
 		break;
-	case 10:	// ReadID
+	case 10:	/* ReadID */
 		memset(&id, 0, sizeof(FDCID));
 		fdc.st0 = prm1->us&7;
 		if ( (FDD_IsReady(fdc.drv))||(fdc.ready) ) {
@@ -324,7 +335,7 @@ fclose(fp);
 		rsp->st2 = fdc.st2;
 		FDC_SetInt();
 		break;
-	case 13:	// WriteID
+	case 13:	/* WriteID */
 		fdc.st0 = prm1->us&7;
 		if ( FDD_IsReadOnly(fdc.drv) ) {
 			fdc.st0 |= 0x40;
@@ -337,7 +348,7 @@ fclose(fp);
 		}
 		if ( fdc.st0&0x40 ) FDC_EPhaseEnd();
 		break;
-	case 15:	// Seek
+	case 15:	/* Seek */
 		fdc.st0 = prm1->us&0x07;
 		if ( FDD_IsReady(fdc.drv) ) {
 			fdc.cyl = prm1->n;
@@ -378,8 +389,8 @@ static void FDC_WriteBuffer(void)
 	int i;
 
 	switch ( fdc.cmd ) {
-	case 5:		// WriteData
-	case 9:		// WriteDeletedData
+	case 5:		/* WriteData */
+	case 9:		/* WriteDeletedData */
 		id.c = prm0->c;
 		id.h = prm0->h;
 		id.r = prm0->r;
@@ -392,7 +403,7 @@ static void FDC_WriteBuffer(void)
 			FDC_NextTrack();
 		}
 		break;
-	case 13:	// WriteID
+	case 13:	/* WriteID */
 		fdc.DataBuf[fdc.wrptr] = prm2->d;
 		if ( !FDD_WriteID(fdc.drv, (fdc.cyl<<1)+HD(prm2), fdc.DataBuf, prm2->sc) ) {
 			fdc.st0 |= 0x40;
@@ -400,7 +411,7 @@ static void FDC_WriteBuffer(void)
 		}
 		FDC_EPhaseEnd();
 		break;
-	case 17:	// ScanEqual
+	case 17:	/* ScanEqual */
 		for (i=0; i<fdc.bufnum; i++) {
 			if ( (fdc.DataBuf[i]!=0xff)&&(fdc.ScanBuf[i]!=fdc.DataBuf[i]) ) {
 				fdc.st0 |= 0x40;
@@ -412,7 +423,7 @@ static void FDC_WriteBuffer(void)
 		}
 		FDC_NextTrack();
 		break;
-	case 25:	// ScanLowOrEqual
+	case 25:	/* ScanLowOrEqual */
 		for (i=0; i<fdc.bufnum; i++) {
 			if ( fdc.DataBuf[i]!=0xff ) {
 				if ( fdc.ScanBuf[i]>fdc.DataBuf[i] ) {
@@ -428,7 +439,7 @@ static void FDC_WriteBuffer(void)
 		}
 		FDC_NextTrack();
 		break;
-	case 29:	// ScanHighOrEqual
+	case 29:	/* ScanHighOrEqual */
 		for (i=0; i<fdc.bufnum; i++) {
 			if ( fdc.DataBuf[i]!=0xff ) {
 				if ( fdc.ScanBuf[i]<fdc.DataBuf[i] ) {
@@ -448,12 +459,12 @@ static void FDC_WriteBuffer(void)
 }
 
 
-// -----------------------------------------------------------------------
-//   I/O Read
-// -----------------------------------------------------------------------
-BYTE FASTCALL FDC_Read(DWORD adr)
+/*
+ *   I/O Read
+ */
+uint8_t FASTCALL FDC_Read(uint32_t adr)
 {
-	BYTE ret = 0x00;
+	uint8_t ret = 0x00;
 	if ( adr==0xe94001 ) {					/* FDC Status */
 		ret  = 0x80;
 		ret |= ((fdc.rdnum)&&(!fdc.wexec))?0x40:0;
@@ -474,32 +485,27 @@ BYTE FASTCALL FDC_Read(DWORD adr)
 		if ( (fdc.ctrl&1)&&(FDD_IsReady(0)) ) ret = 0x80;
 		if ( (fdc.ctrl&2)&&(FDD_IsReady(1)) ) ret = 0x80;
 	}
-/*{
-FILE* fp = fopen("_fdc.txt", "a");
-fprintf(fp, "Adr:$%08X  ret=$%02X\n", adr, ret);
-fclose(fp);
-}*/
 	return ret;
 }
 
 
-// -----------------------------------------------------------------------
-//   I/O Write
-// -----------------------------------------------------------------------
-void FASTCALL FDC_Write(DWORD adr, BYTE data)
+/*
+ *   I/O Write
+ */
+void FASTCALL FDC_Write(uint32_t adr, uint8_t data)
 {
 	if ( adr==0xe94003 ) {
-		if ( fdc.bufnum ) {                 // WriteData
+		if ( fdc.bufnum ) {                 /* WriteData */
 			fdc.DataBuf[fdc.wrptr++] = data;
 			if ( fdc.wrptr>=fdc.bufnum ) {
 				FDC_WriteBuffer();
 				fdc.wrptr = 0;
 			}
 		} else {
-			if ( fdc.wrnum ) {          // Writing params
+			if ( fdc.wrnum ) {          /* Writing params */
 				fdc.PrmBuf[fdc.wrptr++] = data;
 				fdc.wrnum--;
-			} else {                    // Command start
+			} else {                    /* Command start */
 				fdc.cmd = data&0x1f;
 				fdc.rdptr = 0;
 				fdc.wrptr = 0;
@@ -517,12 +523,12 @@ void FASTCALL FDC_Write(DWORD adr, BYTE data)
 			}
 		}
 	} else if ( adr==0xe94005 ) {
-		if ( (fdc.ctrl&0x01)&&(!(data&0x01)) ) {	// Drive0 control (Down edge)
+		if ( (fdc.ctrl&0x01)&&(!(data&0x01)) ) {	/* Drive0 control (Down edge) */
 			if ( fdc.ctrl&0x20 ) FDD_EjectFD(0);
 			FDD_SetEMask(0, (fdc.ctrl&0x40)?1:0);
 			FDD_SetBlink(0, (fdc.ctrl&0x80)?1:0);
 		}
-		if ( (fdc.ctrl&0x02)&&(!(data&0x02)) ) {	// Drive1 control (Down edge)
+		if ( (fdc.ctrl&0x02)&&(!(data&0x02)) ) {	/* Drive1 control (Down edge) */
 			if ( fdc.ctrl&0x20 ) FDD_EjectFD(1);
 			FDD_SetEMask(1, (fdc.ctrl&0x40)?1:0);
 			FDD_SetBlink(1, (fdc.ctrl&0x80)?1:0);
@@ -531,10 +537,5 @@ void FASTCALL FDC_Write(DWORD adr, BYTE data)
 	} else if ( adr==0xe94007 ) {
 		fdc.drv = (data&0x80)?(data&3):(-1);
 		FDD_SetAccess(fdc.drv);
-/*{
-FILE* fp = fopen("_fdc.txt", "a");
-fprintf(fp, "ActiveDrive=%d\n", fdc.drv);
-fclose(fp);
-}*/
 	}
 }

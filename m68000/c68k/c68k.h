@@ -33,21 +33,10 @@ extern "C" {
 #endif
 
 #include "core.h"
-#include "common.h"
 
-// setting
-///////////
-
-//#define NEOCD_HLE
-
-//#define C68K_GEN
 #define C68K_BYTE_SWAP_OPT
 
-#ifdef WORDS_BIGENDIAN
-#define C68K_BIG_ENDIAN
-#endif
-
-#ifdef C68K_BIG_ENDIAN
+#ifdef MSB_FIRST
  #define BYTE_OFF 3
  #define WORD_OFF 1
 #else
@@ -55,16 +44,9 @@ extern "C" {
  #define WORD_OFF 0
 #endif
 
-//#define C68K_NO_JUMP_TABLE
-//#define C68K_DEBUG
-#define C68K_TAS_CAN_SET_MEMORY
-//#define C68K_CONST_JUMP_TABLE
-//#define C68K_AUTOVECTOR_CALLBACK
+/* 68K core types definitions */
 
-// 68K core types definitions
-//////////////////////////////
-
-#define C68K_FETCH_BITS 8   // [4-12]   default = 8
+#define C68K_FETCH_BITS 8   /* [4-12]   default = 8 */
 #define C68K_ADR_BITS   24
 
 #define C68K_FETCH_SFT  (C68K_ADR_BITS - C68K_FETCH_BITS)
@@ -90,7 +72,7 @@ extern "C" {
 #define C68K_CCR_MASK   0x1F
 #define C68K_SR_MASK    (0x2700 | C68K_CCR_MASK)
 
-// exception defines taken from musashi core
+/* exception defines taken from musashi core */
 #define C68K_RESET_EX                   1
 #define C68K_BUS_ERROR_EX               2
 #define C68K_ADDRESS_ERROR_EX           3
@@ -116,99 +98,90 @@ extern "C" {
 #define C68K_DISABLE    0x10
 #define C68K_FAULTED    0x40
 
-typedef u32 FASTCALL C68K_READ(const u32 adr);
-typedef void FASTCALL C68K_WRITE(const u32 adr, u32 data);
+typedef uint32_t FASTCALL C68K_READ(const uint32_t adr);
+typedef void FASTCALL C68K_WRITE(const uint32_t adr, uint32_t data);
 
-typedef s32  FASTCALL C68K_INT_CALLBACK(s32 level);
+typedef int32_t  FASTCALL C68K_INT_CALLBACK(int32_t level);
 typedef void FASTCALL C68K_RESET_CALLBACK(void);
 
 typedef struct {
-    u32 D[8];       // 32 bytes aligned
-    u32 A[8];       // 16 bytes aligned
+    uint32_t D[8];       /* 32 bytes aligned */
+    uint32_t A[8];       /* 16 bytes aligned */
 
-    u32 flag_C;     // 32 bytes aligned
-    u32 flag_V;
-    u32 flag_notZ;
-    u32 flag_N;
+    uint32_t flag_C;     /* 32 bytes aligned */
+    uint32_t flag_V;
+    uint32_t flag_notZ;
+    uint32_t flag_N;
 
-    u32 flag_X;     // 16 bytes aligned
-    u32 flag_I;
-    u32 flag_S;
+    uint32_t flag_X;     /* 16 bytes aligned */
+    uint32_t flag_I;
+    uint32_t flag_S;
     
-    u32 USP;
+    uint32_t USP;
 
-    pointer PC;         // 32 bytes aligned
-    pointer BasePC;
-    u32 Status;
-    s32 IRQLine;
+    uintptr_t PC;         /* 32 bytes aligned */
+    uintptr_t BasePC;
+    uint32_t Status;
+    int32_t IRQLine;
     
-    s32 CycleToDo;  // 16 bytes aligned
-    s32 CycleIO;
-    s32 CycleSup;
-    u32 dirty1;
+    int32_t CycleToDo;  /* 16 bytes aligned */
+    int32_t CycleIO;
+    int32_t CycleSup;
+    uint32_t dirty1;
     
-    C68K_READ *Read_Byte;                   // 32 bytes aligned
+    C68K_READ *Read_Byte;                   /* 32 bytes aligned */
     C68K_READ *Read_Word;
 
     C68K_WRITE *Write_Byte;
     C68K_WRITE *Write_Word;
 
-    C68K_INT_CALLBACK *Interrupt_CallBack;  // 16 bytes aligned
+    C68K_INT_CALLBACK *Interrupt_CallBack;  /* 16 bytes aligned */
     C68K_RESET_CALLBACK *Reset_CallBack;
 
-	pointer Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
+    uintptr_t Fetch[C68K_FETCH_BANK];             /* 32 bytes aligned */
 } c68k_struc;
 
 
-// 68K core var declaration
-////////////////////////////
+/* 68K core var declaration */
 
 extern  c68k_struc C68K;
 
 
-// 68K core function declaration
-/////////////////////////////////
+/* 68K core function declaration */
 
 void    C68k_Init(c68k_struc *cpu, C68K_INT_CALLBACK *int_cb);
 
-s32     FASTCALL C68k_Reset(c68k_struc *cpu);
+int32_t FASTCALL C68k_Reset(c68k_struc *cpu);
 
-// if <  0 --> error (cpu state returned)
-// if >= 0 --> number of extras cycles done
-s32	    FASTCALL C68k_Exec(c68k_struc *cpu, s32 cycle);
+/* if <  0 --> error (cpu state returned)
+ * if >= 0 --> number of extras cycles done */
+int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle);
 
-void    FASTCALL C68k_Set_IRQ(c68k_struc *cpu, s32 level);
+void FASTCALL C68k_Set_IRQ(c68k_struc *cpu, int32_t level);
 
-s32     FASTCALL C68k_Get_CycleToDo(c68k_struc *cpu);
-s32     FASTCALL C68k_Get_CycleRemaining(c68k_struc *cpu);
-s32     FASTCALL C68k_Get_CycleDone(c68k_struc *cpu);
-void    FASTCALL C68k_Release_Cycle(c68k_struc *cpu);
-void    FASTCALL C68k_Add_Cycle(c68k_struc *cpu, s32 cycle);
-
-void    C68k_Set_Fetch(c68k_struc *cpu, u32 low_adr, u32 high_adr, pointer fetch_adr);
+void    C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintptr_t fetch_adr);
 
 void    C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func);
 void    C68k_Set_ReadW(c68k_struc *cpu, C68K_READ *Func);
 void    C68k_Set_WriteB(c68k_struc *cpu, C68K_WRITE *Func);
 void    C68k_Set_WriteW(c68k_struc *cpu, C68K_WRITE *Func);
 
-u32     C68k_Get_DReg(c68k_struc *cpu, u32 num);
-u32     C68k_Get_AReg(c68k_struc *cpu, u32 num);
-u32     C68k_Get_PC(c68k_struc *cpu);
-u32     C68k_Get_SR(c68k_struc *cpu);
-u32     C68k_Get_USP(c68k_struc *cpu);
-u32     C68k_Get_MSP(c68k_struc *cpu);
+uint32_t     C68k_Get_DReg(c68k_struc *cpu, uint32_t num);
+uint32_t     C68k_Get_AReg(c68k_struc *cpu, uint32_t num);
+uint32_t     C68k_Get_PC(c68k_struc *cpu);
+uint32_t     C68k_Get_SR(c68k_struc *cpu);
+uint32_t     C68k_Get_USP(c68k_struc *cpu);
+uint32_t     C68k_Get_MSP(c68k_struc *cpu);
 
-void    C68k_Set_DReg(c68k_struc *cpu, u32 num, u32 val);
-void    C68k_Set_AReg(c68k_struc *cpu, u32 num, u32 val);
-void    C68k_Set_PC(c68k_struc *cpu, u32 val);
-void    C68k_Set_SR(c68k_struc *cpu, u32 val);
-void    C68k_Set_USP(c68k_struc *cpu, u32 val);
-void    C68k_Set_MSP(c68k_struc *cpu, u32 val);
+void    C68k_Set_DReg(c68k_struc *cpu, uint32_t num, uint32_t val);
+void    C68k_Set_AReg(c68k_struc *cpu, uint32_t num, uint32_t val);
+void    C68k_Set_PC(c68k_struc *cpu, uint32_t val);
+void    C68k_Set_SR(c68k_struc *cpu, uint32_t val);
+void    C68k_Set_USP(c68k_struc *cpu, uint32_t val);
+void    C68k_Set_MSP(c68k_struc *cpu, uint32_t val);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // _C68K_H_
-
+#endif  /* _C68K_H_ */

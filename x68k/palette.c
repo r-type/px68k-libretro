@@ -1,41 +1,56 @@
-// ---------------------------------------------------------------------------------------
-//  PALETTE.C - Text/BG/Graphic Palette
-// ---------------------------------------------------------------------------------------
+/*
+ *  PALETTE.C - Text/BG/Graphic Palette
+ */
 
 #include	"common.h"
 #include	"windraw.h"
 #include	"tvram.h"
 #include	"bg.h"
 #include	"crtc.h"
-#include	"memory.h"
+#include	"x68kmemory.h"
 #include	"m68000.h"
 #include	"palette.h"
 
-	BYTE	Pal_Regs[1024];
-	WORD	TextPal[256];
-	WORD	GrphPal[256];
-	WORD	Pal16[65536];
-	WORD	Ibit;				// 半透明処理とかで使うかも〜
+uint8_t		Pal_Regs[1024];
+uint16_t	TextPal[256];
+uint16_t	GrphPal[256];
+uint16_t	Pal16[65536];
+uint16_t	Ibit;
 
-	WORD	Pal_HalfMask, Pal_Ix2;
-	WORD	Pal_R, Pal_G, Pal_B;		// 画面輝度変更時用
+uint16_t	Pal_HalfMask, Pal_Ix2;
+uint16_t	Pal_R, Pal_G, Pal_B;
 
-// ----- DDrawの16ビットモードの色マスクからX68k→Win用の変換テーブルを作る -----
-// X68kは「GGGGGRRRRRBBBBBI」の構造。Winは「RRRRRGGGGGGBBBBB」の形が多いみたい。が、
-// 違う場合もあるみたいなので計算してみやう。
+int Pal_StateAction(StateMem *sm, int load, int data_only)
+{
+	SFORMAT StateRegs[] =
+	{
+		SFARRAY(Pal_Regs, 1024),
+		SFARRAY16(TextPal, 256),
+		SFARRAY16(GrphPal, 256),
+		SFARRAY16(Pal16, 65536),
+
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_Palette", false);
+
+	return ret;
+}
+
 void Pal_SetColor(void)
 {
-	WORD TempMask, bit;
-	WORD R[5] = {0, 0, 0, 0, 0};
-	WORD G[5] = {0, 0, 0, 0, 0};
-	WORD B[5] = {0, 0, 0, 0, 0};
-	int r, g, b, i;
-
-	r = g = b = 5;
-	Pal_R = Pal_G = Pal_B = 0;
-	TempMask = 0;				// 使われているビットをチェック（Iビット用）
+	int i;
+	uint16_t bit;
+	uint16_t R[5]     = {0, 0, 0, 0, 0};
+	uint16_t G[5]     = {0, 0, 0, 0, 0};
+	uint16_t B[5]     = {0, 0, 0, 0, 0};
+	int r         = 5;
+	int g         = 5;
+	int b         = 5;
+	uint16_t TempMask = 0;
+	Pal_R         = Pal_G = Pal_B = 0;
 	for (bit=0x8000; bit; bit>>=1)
-	{					// 各色毎に左（上位）から5ビットずつ拾う
+	{
 		if ( (WinDraw_Pal16R&bit)&&(r) )
 		{
 			R[--r] = bit;
@@ -58,34 +73,17 @@ void Pal_SetColor(void)
 
 	Ibit = 1;
 	for (bit=1; bit; bit<<=1)
-	{					// 使われていないビット（通常は6ビット以上ある色の
-		if (!(TempMask&bit))		// 最下位ビット）をIビットとして扱う
-		{				// 0のビットが複数だったときを考えて、Ibit=~TempMask; にはしてないです
+	{
+		if (!(TempMask&bit))
+		{
 			Ibit = bit;
 			break;
 		}
 	}
 
-	// ねこーねこー
-	// Pal_Ix2 = 0 になったらどうしよう… その時は32bit拡張…
-
-	// → Riva128なんかでは見事になるみたい（笑） でもそれでも特に問題無いかも…
-
 	Pal_HalfMask = ~(B[0] | R[0] | G[0] | Ibit);
 	Pal_Ix2 = Ibit << 1;
 
-/*
-	// どーしても変そうなら、これを入れるか…32bit拡張めんどくさいし（汗
-	if (Ibit==0x8000)			// Ibitが最上位ビットだったら、青の最下位と入れ替え
-	{
-		Ibit = B[0];
-		B[0] = 0;			// 青は4bitになっちゃうけど我慢して ^^;
-		Pal_HalfMask = ~(B[1] | R[0] | G[0] | Ibit | 0x8000);
-		Pal_Ix2 = Ibit << 1;
-	}
-*/
-						// X68kのビット配置に合わせてテーブル作成
-						// すっげ〜手際が悪いね（汗
 	for (i=0; i<65536; i++)
 	{
 		bit = 0;
@@ -109,36 +107,24 @@ void Pal_SetColor(void)
 	}
 }
 
-
-// -----------------------------------------------------------------------
-//   初期化
-// -----------------------------------------------------------------------
 void Pal_Init(void)
 {
-	ZeroMemory(Pal_Regs, 1024);
-	ZeroMemory(TextPal, 512);
-	ZeroMemory(GrphPal, 512);
+	memset(Pal_Regs, 0, 1024);
+	memset(TextPal,  0, 512);
+	memset(GrphPal,  0, 512);
 	Pal_SetColor();
 }
 
-
-// -----------------------------------------------------------------------
-//   I/O Read
-// -----------------------------------------------------------------------
-BYTE FASTCALL Pal_Read(DWORD adr)
+uint8_t FASTCALL Pal_Read(uint32_t adr)
 {
 	if (adr<0xe82400)
 		return Pal_Regs[adr-0xe82000];
 	else return 0xff;
 }
 
-
-// -----------------------------------------------------------------------
-//   I/O Write
-// -----------------------------------------------------------------------
-void FASTCALL Pal_Write(DWORD adr, BYTE data)
+void FASTCALL Pal_Write(uint32_t adr, uint8_t data)
 {
-	WORD pal;
+	uint16_t pal;
 
 	if (adr>=0xe82400) return;
 
@@ -155,7 +141,6 @@ void FASTCALL Pal_Write(DWORD adr, BYTE data)
 	}
 	else if (adr<0x400)
 	{
-		if (MemByteAccess) return;		// TextPalはバイトアクセスは出来ないらしい（神戸恋愛物語）
 		Pal_Regs[adr] = data;
 		TVRAM_SetAllDirty();
 		pal = Pal_Regs[adr&0xfffe];
@@ -164,26 +149,22 @@ void FASTCALL Pal_Write(DWORD adr, BYTE data)
 	}
 }
 
-
-// -----------------------------------------------------------------------
-//   こんとらすと変更（パレットに対するWin側の表示色で実現してます ^^;）
-// -----------------------------------------------------------------------
 void Pal_ChangeContrast(int num)
 {
-	WORD bit;
-	WORD R[5] = {0, 0, 0, 0, 0};
-	WORD G[5] = {0, 0, 0, 0, 0};
-	WORD B[5] = {0, 0, 0, 0, 0};
+	uint16_t bit;
+	uint16_t R[5] = {0, 0, 0, 0, 0};
+	uint16_t G[5] = {0, 0, 0, 0, 0};
+	uint16_t B[5] = {0, 0, 0, 0, 0};
 	int r, g, b, i;
 	int palr, palg, palb;
-	WORD pal;
+	uint16_t pal;
 
 	TVRAM_SetAllDirty();
 
 	r = g = b = 5;
 
 	for (bit=0x8000; bit; bit>>=1)
-	{					// 各色毎に左（上位）から5ビットずつ拾う
+	{
 		if ( (WinDraw_Pal16R&bit)&&(r) ) R[--r] = bit;
 		if ( (WinDraw_Pal16G&bit)&&(g) ) G[--g] = bit;
 		if ( (WinDraw_Pal16B&bit)&&(b) ) B[--b] = bit;
@@ -208,9 +189,9 @@ void Pal_ChangeContrast(int num)
 		if (i&0x0004) palb |= B[1];
 		if (i&0x0002) palb |= B[0];
 		pal = palr | palb | palg;
-		palg = (WORD)((palg*num)/15)&Pal_G;
-		palr = (WORD)((palr*num)/15)&Pal_R;
-		palb = (WORD)((palb*num)/15)&Pal_B;
+		palg = (uint16_t)((palg * num)/15)&Pal_G;
+		palr = (uint16_t)((palr * num)/15)&Pal_R;
+		palb = (uint16_t)((palb * num)/15)&Pal_B;
 		Pal16[i] = palr | palb | palg;
 		if ((pal)&&(!Pal16[i])) Pal16[i] = B[0];
 		if (i&0x0001) Pal16[i] |= Ibit;
@@ -218,12 +199,12 @@ void Pal_ChangeContrast(int num)
 
 	for (i=0; i<256; i++)
 	{
-		pal = Pal_Regs[i*2];
-		pal = (pal<<8)+Pal_Regs[i*2+1];
+		pal = Pal_Regs[i * 2];
+		pal = (pal<<8)+Pal_Regs[i * 2+1];
 		GrphPal[i] = Pal16[pal];
 
-		pal = Pal_Regs[i*2+512];
-		pal = (pal<<8)+Pal_Regs[i*2+513];
+		pal = Pal_Regs[i * 2+512];
+		pal = (pal<<8)+Pal_Regs[i * 2+513];
 		TextPal[i] = Pal16[pal];
 	}
 }

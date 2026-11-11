@@ -2,21 +2,31 @@
 
 	m68000.c
 
-	M68000 CPU¥¤¥ó¥¿¥Õ¥§¡¼¥¹´Ø¿ô
+	M68000 CPUï¿½ï¿½ï¿½ó¥¿¥Õ¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¿ï¿½
 
 ******************************************************************************/
 
 #ifndef M68000_H
 #define M68000_H
 
-#ifndef CYCLONE
-#include "c68k/c68k.h"
-#else
+#include <stdint.h>
 #include "common.h"
+
+#if defined (HAVE_CYCLONE)
 #include "cyclone.h"
 #endif
+#if defined (HAVE_C68K)
+#include "c68k/c68k.h"
+#endif
+#if defined (HAVE_M68000)
+#include "m68k/c68k.h"
+#endif
+#if defined (HAVE_MUSASHI)
+#include "musashi/m68k.h"
+#include "musashi/m68kcpu.h"
+#endif
 
-// MAME¸ß´¹¤Î¥ì¥¸¥¹¥¿ÈÖ¹æ (°ìÉôÌ¤ÂÐ±þ)
+/* MAMEï¿½ß´ï¿½ï¿½Î¥ì¥¸ï¿½ï¿½ï¿½ï¿½ï¿½Ö¹ï¿½ (ï¿½ï¿½ï¿½ï¿½Ì¤ï¿½Ð±ï¿½) */
 enum
 {
 	/* NOTE: M68K_SP fetches the current SP, be it USP, ISP, or MSP */
@@ -26,16 +36,20 @@ enum
 	M68K_A0, M68K_A1, M68K_A2, M68K_A3, M68K_A4, M68K_A5, M68K_A6, M68K_A7
 };
 
+extern	int	m68000_ICountBk;
+extern	int	ICount;
+
 void m68000_init(void);
+void m68000_set_emulation(int use_musashi);
+int  m68000_get_emulation(void);
 void m68000_reset(void);
 void m68000_exit(void);
 int  m68000_execute(int cycles);
 
 void m68000_set_irq_line(int irqline, int state);
-void m68000_set_irq_callback(int (*callback)(int irqline));
-UINT32  m68000_get_reg(int regnum);
-void m68000_set_reg(int regnum, UINT32 val);
-
+uint32_t  m68000_get_reg(int regnum);
+void m68000_set_reg(int regnum, uint32_t val);
+int m68000_StateAction(StateMem *sm, int load, int data_only);
 
 #ifdef SAVE_STATE
 STATE_SAVE( m68000 );

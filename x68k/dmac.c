@@ -1,12 +1,7 @@
-// ---------------------------------------------------------------------------------------
-//  DMAC.C - DMAコントローラ（HD63450）
-//  ToDo : もっと奇麗に ^^;
-// ---------------------------------------------------------------------------------------
-
 #include "common.h"
 #include "winx68k.h"
 #include "m68000.h"
-#include "memory.h"
+#include "x68kmemory.h"
 #include "irqh.h"
 #include "fdc.h"
 #include "sasi.h"
@@ -15,11 +10,12 @@
 #include "dmac.h"
 
 dmac_ch	DMA[4];
-int dmatrace = 0;
 
 static int DMA_IntCH = 0;
 static int DMA_LastInt = 0;
 static int (*IsReady[4])(void) = { 0, 0, 0, 0 };
+
+static uint32_t FASTCALL DMA_Int(uint8_t irq);
 
 #define DMAINT(ch)     if ( DMA[ch].CCR&0x08 )	{ DMA_IntCH |= (1<<ch); IRQH_Int(3, &DMA_Int); }
 #define DMAERR(ch,err) DMA[ch].CER  = err; \
@@ -28,24 +24,108 @@ static int (*IsReady[4])(void) = { 0, 0, 0, 0 };
                        DMA[ch].CCR &= 0x7f; \
                        DMAINT(ch)
 
-
-static int DMA_DummyIsReady(void)
+int DMAC_StateAction(StateMem *sm, int load, int data_only)
 {
-	return 0;
+	SFORMAT StateRegs[] = 
+	{
+      SFVARN(DMA[0].CSR, "CSR0"),
+	   SFVARN(DMA[0].CER, "CER0"),
+	   SFVARN(DMA[0].DCR, "DCR0"),
+	   SFVARN(DMA[0].OCR, "OCR0"),
+	   SFVARN(DMA[0].SCR, "SCR0"),
+	   SFVARN(DMA[0].CCR, "CCR0"),
+	   SFVARN(DMA[0].MTC, "MTC0"),
+	   SFVARN(DMA[0].MAR, "MAR0"),
+	   SFVARN(DMA[0].DAR, "DAR0"),
+	   SFVARN(DMA[0].BTC, "BTC0"),
+	   SFVARN(DMA[0].BAR, "BAR0"),
+	   SFVARN(DMA[0].NIV, "NIV0"),
+	   SFVARN(DMA[0].EIV, "EIV0"),
+	   SFVARN(DMA[0].MFC, "MFC0"),
+	   SFVARN(DMA[0].CPR, "CPR0"),
+	   SFVARN(DMA[0].DFC, "DFC0"),
+	   SFVARN(DMA[0].BFC, "BFC0"),
+	   SFVARN(DMA[0].GCR, "GCR0"),
+
+      SFVARN(DMA[1].CSR, "CSR1"),
+	   SFVARN(DMA[1].CER, "CER1"),
+	   SFVARN(DMA[1].DCR, "DCR1"),
+	   SFVARN(DMA[1].OCR, "OCR1"),
+	   SFVARN(DMA[1].SCR, "SCR1"),
+	   SFVARN(DMA[1].CCR, "CCR1"),
+	   SFVARN(DMA[1].MTC, "MTC1"),
+	   SFVARN(DMA[1].MAR, "MAR1"),
+	   SFVARN(DMA[1].DAR, "DAR1"),
+	   SFVARN(DMA[1].BTC, "BTC1"),
+	   SFVARN(DMA[1].BAR, "BAR1"),
+	   SFVARN(DMA[1].NIV, "NIV1"),
+	   SFVARN(DMA[1].EIV, "EIV1"),
+	   SFVARN(DMA[1].MFC, "MFC1"),
+	   SFVARN(DMA[1].CPR, "CPR1"),
+	   SFVARN(DMA[1].DFC, "DFC1"),
+	   SFVARN(DMA[1].BFC, "BFC1"),
+	   SFVARN(DMA[1].GCR, "GCR1"),
+
+      SFVARN(DMA[2].CSR, "CSR2"),
+	   SFVARN(DMA[2].CER, "CER2"),
+	   SFVARN(DMA[2].DCR, "DCR2"),
+	   SFVARN(DMA[2].OCR, "OCR2"),
+	   SFVARN(DMA[2].SCR, "SCR2"),
+	   SFVARN(DMA[2].CCR, "CCR2"),
+	   SFVARN(DMA[2].MTC, "MTC2"),
+	   SFVARN(DMA[2].MAR, "MAR2"),
+	   SFVARN(DMA[2].DAR, "DAR2"),
+	   SFVARN(DMA[2].BTC, "BTC2"),
+	   SFVARN(DMA[2].BAR, "BAR2"),
+	   SFVARN(DMA[2].NIV, "NIV2"),
+	   SFVARN(DMA[2].EIV, "EIV2"),
+	   SFVARN(DMA[2].MFC, "MFC2"),
+	   SFVARN(DMA[2].CPR, "CPR2"),
+	   SFVARN(DMA[2].DFC, "DFC2"),
+	   SFVARN(DMA[2].BFC, "BFC2"),
+	   SFVARN(DMA[2].GCR, "GCR2"),
+
+      SFVARN(DMA[3].CSR, "CSR3"),
+	   SFVARN(DMA[3].CER, "CER3"),
+	   SFVARN(DMA[3].DCR, "DCR3"),
+	   SFVARN(DMA[3].OCR, "OCR3"),
+	   SFVARN(DMA[3].SCR, "SCR3"),
+	   SFVARN(DMA[3].CCR, "CCR3"),
+	   SFVARN(DMA[3].MTC, "MTC3"),
+	   SFVARN(DMA[3].MAR, "MAR3"),
+	   SFVARN(DMA[3].DAR, "DAR3"),
+	   SFVARN(DMA[3].BTC, "BTC3"),
+	   SFVARN(DMA[3].BAR, "BAR3"),
+	   SFVARN(DMA[3].NIV, "NIV3"),
+	   SFVARN(DMA[3].EIV, "EIV3"),
+	   SFVARN(DMA[3].MFC, "MFC3"),
+	   SFVARN(DMA[3].CPR, "CPR3"),
+	   SFVARN(DMA[3].DFC, "DFC3"),
+	   SFVARN(DMA[3].BFC, "BFC3"),
+	   SFVARN(DMA[3].GCR, "GCR3"),
+
+	   SFVAR(DMA_IntCH),
+	   SFVAR(DMA_LastInt),
+
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_DMAC", false);
+
+	return ret;
 }
 
+static int ADPCM_IsReady(void)    { return 1; }
+static int DMA_DummyIsReady(void) { return 0; }
 
-void DMA_SetReadyCB(int ch, int (*func)(void))
+static void DMA_SetReadyCB(int ch, int (*func)(void))
 {
 	if ( (ch>=0)&&(ch<=3) ) IsReady[ch] = func;
 }
 
-// -----------------------------------------------------------------------
-//   割り込みベクタを返す
-// -----------------------------------------------------------------------
-DWORD FASTCALL DMA_Int(BYTE irq)
+static uint32_t FASTCALL DMA_Int(uint8_t irq)
 {
-	DWORD ret = 0xffffffff;
+	uint32_t ret = 0xffffffff;
 	int bit = 0;
 	int i = DMA_LastInt;
 	IRQH_IRQCallBack(irq);
@@ -54,9 +134,9 @@ DWORD FASTCALL DMA_Int(BYTE irq)
 			bit = 1<<i;
 			if ( DMA_IntCH&bit ) {
 				if ( (DMA[i].CSR)&0x10 )
-					ret = ((DWORD)(DMA[i].EIV));
+					ret = ((uint32_t)(DMA[i].EIV));
 				else
-					ret = ((DWORD)(DMA[i].NIV));
+					ret = ((uint32_t)(DMA[i].NIV));
 				DMA_IntCH &= ~bit;
 				break;
 			}
@@ -68,171 +148,330 @@ DWORD FASTCALL DMA_Int(BYTE irq)
 	return ret;
 }
 
-
-// -----------------------------------------------------------------------
-//   I/O Read
-// -----------------------------------------------------------------------
-BYTE FASTCALL DMA_Read(DWORD adr)
+uint8_t FASTCALL DMA_Read(uint32_t adr)
 {
-	unsigned char* p;
-	int off = adr&0x3f, ch = ((adr-0xe84000)>>6);
+   int off = adr & 0x3f;
+   int ch = (adr >> 6) & 0x03;
 
-	if ( adr>=0xe84100 ) return 0;		// ばすえらー？
+   if (adr >= 0xe84100)
+      return 0;
 
-	p = (unsigned char*)&DMA[ch];
-
-	switch ( off ) {
-	case 0x00:
-		if ( (ch==2)&&(off==0) ) {
-#ifndef	NO_MERCURY
-			DMA[ch].CSR = (DMA[ch].CSR&0xfe)|(Mcry_LRTiming&1);
+   switch (off)
+   {
+      case 0x00:
+         if ((ch == 2) && (off == 0))
+         {
+#ifndef NO_MERCURY
+            DMA[ch].CSR = (DMA[ch].CSR & 0xfe) | (Mcry_LRTiming & 1);
 #else
-			DMA[ch].CSR = (DMA[ch].CSR&0xfe);
-			Mcry_LRTiming ^= 1;
+            DMA[ch].CSR = (DMA[ch].CSR & 0xfe);
+            Mcry_LRTiming ^= 1;
 #endif
-		}
-		break;
-	case 0x0a: case 0x0b: case 0x1a: case 0x1b:
-		p += (off^1);
-		break;
-	case 0x0c: case 0x0d: case 0x0e: case 0x0f:
-	case 0x14: case 0x15: case 0x16: case 0x17:
-	case 0x1c: case 0x1d: case 0x1e: case 0x1f:
-		p += ((off&0xfc)+3-(off&3));
-		break;
-	default:
-		p += off;
-	}
-	return *p;
+         }
+         return DMA[ch].CSR;
+      case 0x01:
+         return DMA[ch].CER;
+      case 0x04:
+         return DMA[ch].DCR;
+      case 0x05:
+         return DMA[ch].OCR;
+      case 0x06:
+         return DMA[ch].SCR;
+      case 0x07:
+         return DMA[ch].CCR;
+      case 0x0a:
+         return (DMA[ch].MTC >> 8) & 0xff;
+      case 0x0b:
+         return DMA[ch].MTC & 0xff;
+      case 0x0c:
+         return (DMA[ch].MAR >> 24) & 0xff;
+      case 0x0d:
+         return (DMA[ch].MAR >> 16) & 0xff;
+      case 0x0e:
+         return (DMA[ch].MAR >> 8) & 0xff;
+      case 0x0f:
+         return DMA[ch].MAR & 0xff;
+      case 0x14:
+         return (DMA[ch].DAR >> 24) & 0xff;
+      case 0x15:
+         return (DMA[ch].DAR >> 16) & 0xff;
+      case 0x16:
+         return (DMA[ch].DAR >> 8) & 0xff;
+      case 0x17:
+         return DMA[ch].DAR & 0xff;
+      case 0x1a:
+         return (DMA[ch].BTC >> 8) & 0xff;
+      case 0x1b:
+         return DMA[ch].BTC & 0xff;
+      case 0x1c:
+         return (DMA[ch].BAR >> 24) & 0xff;
+      case 0x1d:
+         return (DMA[ch].BAR >> 16) & 0xff;
+      case 0x1e:
+         return (DMA[ch].BAR >> 8) & 0xff;
+      case 0x1f:
+         return DMA[ch].BAR & 0xff;
+      case 0x25:
+         return DMA[ch].NIV;
+      case 0x27:
+         return DMA[ch].EIV;
+      case 0x29:
+         return DMA[ch].MFC;
+      case 0x2d:
+         return DMA[ch].CPR;
+      case 0x31:
+         return DMA[ch].DFC;
+      case 0x39:
+         return DMA[ch].BFC;
+      case 0x3f:
+         return DMA[ch].GCR;
+   }
+
+   return 0;
 }
 
-
-// -----------------------------------------------------------------------
-//   I/O Write
-// -----------------------------------------------------------------------
-void FASTCALL DMA_Write(DWORD adr, BYTE data)
+void FASTCALL DMA_Write(uint32_t adr, uint8_t data)
 {
-	unsigned char* p;
-	int off = adr&0x3f, ch = ((adr-0xe84000)>>6);
-	BYTE old;
+   int off = adr & 0x3f;
+   int ch = (adr >> 6) & 0x03;
+   uint8_t old = 0;
 
-	if ( adr>=0xe84100 ) return;		// ばすえらー？
+   if (adr >= 0xe84100)
+      return;
 
-	p = (unsigned char*)&DMA[ch];
+   switch (off)
+   {
+      case 0x00:
+         DMA[ch].CSR &= ((~data) | 0x09);
+         break;
 
-/*if (ch==3) {
-FILE* fp = fopen("_dma.txt", "a");
-fprintf(fp, "W $%02X $%02X\n", off, data);
-fclose(fp);
-}*/
+      case 0x01:
+         DMA[ch].CER &= (~data);
+         break;
 
-	switch ( off ) {
-	case 0x0a: case 0x0b: case 0x1a: case 0x1b:
-		p[off^1] = data;
-		break;
-	case 0x0c: case 0x0d: case 0x0e: case 0x0f:
-	case 0x14: case 0x15: case 0x16: case 0x17:
-	case 0x1c: case 0x1d: case 0x1e: case 0x1f:
-		p[(off&0xfc)+3-(off&3)] = data;
-		break;
-	case 0x00:
-		p[off] &= ((~data)|0x09);
-		break;
-	case 0x01:
-		p[off] &= (~data);
-		break;
-	case 0x07:
-		old = DMA[ch].CCR;
-		DMA[ch].CCR = (data&0xef) | (DMA[ch].CCR&0x80);	// CCRのSTRは書き込みでは落とせない
-		if ( (data&0x10)&&(DMA[ch].CCR&0x80) ) {		// Software Abort
-			DMAERR(ch,0x11)
-			break;
-		}
-		if ( data&0x20 ) {					// Halt
-//			DMA[ch].CSR &= 0xf7;			// 本来は落ちるはず。Nemesis'90で調子悪いので…
-			break;
-		}
-		if ( data&0x80 ) {							// 動作開始
-			if ( old&0x20 ) {				// Halt解除
-				DMA[ch].CSR |= 0x08;
-				DMA_Exec(ch);
-			} else {
-				if ( DMA[ch].CSR&0xf8 ) {					// タイミングエラー
-					DMAERR(ch,0x02)
-					break;
-				}
-				DMA[ch].CSR |= 0x08;
-				if ( (DMA[ch].OCR&8)/*&&(!DMA[ch].MTC)*/ ) {	// アレイ／リンクアレイチェイン
-					DMA[ch].MAR = dma_readmem24_dword(DMA[ch].BAR)&0xffffff;
-					DMA[ch].MTC = dma_readmem24_word(DMA[ch].BAR+4);
-					if (DMA[ch].OCR&4) {
-						DMA[ch].BAR = dma_readmem24_dword(DMA[ch].BAR+6);
-					} else {
-						DMA[ch].BAR += 6;
-						if ( !DMA[ch].BTC ) {			// これもカウントエラー
-						DMAERR(ch,0x0f)
-							break;
-						}
-					}
-				}
-				if ( !DMA[ch].MTC ) {					// カウントエラー
-					DMAERR(ch,0x0d)
-					break;
-				}
-				DMA[ch].CER  = 0x00;
-				DMA_Exec(ch);								// 開始直後にカウンタを見て動作チェックする場合があるので、少しだけ実行しておく
-			}
-		}
-		if ( (data&0x40)&&(!DMA[ch].MTC) ) {			// Continuous Op.
-			if ( DMA[ch].CCR&0x80 ) {
-				if ( DMA[ch].CCR&0x40 ) {
-					DMAERR(ch,0x02)
-				} else if ( DMA[ch].OCR&8 ) {				// アレイ／リンクアレイチェイン
-					DMAERR(ch,0x01)
-				} else {
-					DMA[ch].MAR = DMA[ch].BAR;
-					DMA[ch].MTC = DMA[ch].BTC;
-					DMA[ch].CSR |= 0x08;
-					DMA[ch].BAR = 0;
-					DMA[ch].BTC = 0;
-					if ( !DMA[ch].MAR ) {
-						DMA[ch].CSR |= 0x40;			// ブロック転送終了ビット／割り込み
-						DMAINT(ch)
-						break;
-					} else if ( !DMA[ch].MTC ) {
-						DMAERR(ch,0x0d)
-						break;
-					}
-					DMA[ch].CCR &= 0xbf;
-					DMA_Exec(ch);
-				}
-			} else {									// 非Active時のCNTビットは動作タイミングエラー
-				DMAERR(ch,0x02)
-			}
-		}
-		break;
-	case 0x3f:
-		if ( ch!=3 ) break;
-	default:
-		p[off] = data;
-		break;
-	}
+      case 0x04:
+         DMA[ch].DCR = data;
+         break;
+
+      case 0x05:
+         DMA[ch].OCR = data;
+         break;
+
+      case 0x06:
+         DMA[ch].SCR = data;
+         break;
+
+      case 0x07:
+         old         = DMA[ch].CCR;
+         DMA[ch].CCR = (data & 0xef) | (DMA[ch].CCR & 0x80); /* CCR STR cannot be dropped by writing */
+         if ((data & 0x10) && (DMA[ch].CCR & 0x80))
+         {
+            /* Software Abort */
+            DMAERR(ch, 0x11)
+               break;
+         }
+         if (data & 0x20) /* Halt */
+         {
+            /* Should be correct, but Nemesis'90 will not work properly with it so... */
+            /* DMA[ch].CSR &= 0xf7; */
+            break;
+         }
+         if (data & 0x80)
+         {
+            /* Start DMA */
+            if (old & 0x20)
+            {
+               /* Halt release */
+               DMA[ch].CSR |= 0x08;
+               DMA_Exec(ch);
+            }
+            else
+            {
+               /* Match the HD63450 start behavior used by MAME: a START
+                * command reinitializes the channel status and starts the
+                * transfer, even if the channel was already active. Some
+                * X68000 software reprograms/restarts DMA3 this way while
+                * streaming ADPCM. Treating the active bit as a timing error
+                * aborts the transfer and can leave the ADPCM FIFO empty.
+                */
+               DMA[ch].CSR &= 0x0f; /* Clear completion/error status flags. */
+               DMA[ch].CSR |= 0x08;
+               if ((DMA[ch].OCR & 8) /*&&(!DMA[ch].MTC)*/)
+               {
+                  /* Array/Link Array Chain */
+                  DMA[ch].MAR = dma_readmem24_dword(DMA[ch].BAR) & 0xffffff;
+                  DMA[ch].MTC = dma_readmem24_word(DMA[ch].BAR + 4);
+                  if (DMA[ch].OCR & 4)
+                  {
+                     DMA[ch].BAR = dma_readmem24_dword(DMA[ch].BAR + 6);
+                  }
+                  else
+                  {
+                     DMA[ch].BAR += 6;
+                     if (!DMA[ch].BTC)
+                     {
+                        /* This is also a counting error */
+                        DMAERR(ch, 0x0f)
+                           break;
+                     }
+                  }
+               }
+               if (!DMA[ch].MTC)
+               {
+                  /* Counting error */
+                  DMAERR(ch, 0x0d)
+                     break;
+               }
+               DMA[ch].CER = 0x00;
+               DMA_Exec(ch); /* Since you may need to check the counter immediately after starting, run it for a little while. */
+            }
+         }
+         if ((data & 0x40) && (!DMA[ch].MTC))
+         {
+            /* Continuous Op. */
+            if (DMA[ch].CCR & 0x80)
+            {
+               if (DMA[ch].CCR & 0x40)
+               {
+                  DMAERR(ch, 0x02)
+               }
+               else if (DMA[ch].OCR & 8)
+               {
+                  /* Array/Link Array Chain */
+                  DMAERR(ch, 0x01)
+               }
+               else
+               {
+                  DMA[ch].MAR = DMA[ch].BAR;
+                  DMA[ch].MTC = DMA[ch].BTC;
+                  DMA[ch].CSR |= 0x08;
+                  DMA[ch].BAR = 0;
+                  DMA[ch].BTC = 0;
+                  if (!DMA[ch].MAR)
+                  {
+                     DMA[ch].CSR |= 0x40; /* Block transfer end bit/interrupt? */
+                     DMAINT(ch)
+                        break;
+                  }
+                  else if (!DMA[ch].MTC)
+                  {
+                     DMAERR(ch, 0x0d)
+                        break;
+                  }
+                  DMA[ch].CCR &= 0xbf;
+                  DMA_Exec(ch);
+               }
+            }
+            else
+            {
+               /* The CNT bit in non-active mode indicates an operation timing error */
+               DMAERR(ch, 0x02)
+            }
+         }
+         break;
+
+      case 0x0a:
+         DMA[ch].MTC &= 0x00ff;
+         DMA[ch].MTC |= (data << 8);
+         break;
+      case 0x0b:
+         DMA[ch].MTC &= 0xff00;
+         DMA[ch].MTC |= data;
+         break;
+
+      case 0x0c:
+         break;
+      case 0x0d:
+         DMA[ch].MAR &= 0x0000ffff;
+         DMA[ch].MAR |= (data << 16);
+         break;
+      case 0x0e:
+         DMA[ch].MAR &= 0x00ff00ff;
+         DMA[ch].MAR |= (data << 8);
+         break;
+      case 0x0f:
+         DMA[ch].MAR &= 0x00ffff00;
+         DMA[ch].MAR |= data;
+         break;
+
+      case 0x14:
+         break;
+      case 0x15:
+         DMA[ch].DAR &= 0x0000ffff;
+         DMA[ch].DAR |= (data << 16);
+         break;
+      case 0x16:
+         DMA[ch].DAR &= 0x00ff00ff;
+         DMA[ch].DAR |= (data << 8);
+         break;
+      case 0x17:
+         DMA[ch].DAR &= 0x00ffff00;
+         DMA[ch].DAR |= data;
+         break;
+
+      case 0x1a:
+         DMA[ch].BTC &= 0x00ff;
+         DMA[ch].BTC |= (data << 8);
+         break;
+      case 0x1b:
+         DMA[ch].BTC &= 0xff00;
+         DMA[ch].BTC |= data;
+         break;
+
+      case 0x1c:
+         break;
+      case 0x1d:
+         DMA[ch].BAR &= 0x0000ffff;
+         DMA[ch].BAR |= (data << 16);
+         break;
+      case 0x1e:
+         DMA[ch].BAR &= 0x00ff00ff;
+         DMA[ch].BAR |= (data << 8);
+         break;
+      case 0x1f:
+         DMA[ch].BAR &= 0x00ffff00;
+         DMA[ch].BAR |= data;
+         break;
+
+      case 0x25:
+         DMA[ch].NIV = data;
+         break;
+
+      case 0x27:
+         DMA[ch].EIV = data;
+         break;
+
+      case 0x29:
+         DMA[ch].MFC = data;
+         break;
+
+      case 0x2d:
+         DMA[ch].CPR = data;
+         break;
+
+      case 0x31:
+         DMA[ch].DFC = data;
+         break;
+
+      case 0x39:
+         DMA[ch].BFC = data;
+         break;
+
+      case 0x3f:
+         if (ch == 3)
+            DMA[ch].GCR = data;
+         break;
+   }
 }
 
-
-// -----------------------------------------------------------------------
-//   DMA実行
-// -----------------------------------------------------------------------
 int FASTCALL DMA_Exec(int ch)
 {
-	DWORD *src, *dst;
+	uint32_t *src, *dst;
 
-//	if ( DMA_IntCH&(1<<ch) ) return 1;
-
-	if ( DMA[ch].OCR&0x80 ) {		// Device->Memory
+	if ( DMA[ch].OCR&0x80 ) {		/* Device->Memory */
 		src = &DMA[ch].DAR;
 		dst = &DMA[ch].MAR;
-	} else {				// Memory->Device
+	} else {				/* Memory->Device */
 		src = &DMA[ch].MAR;
 		dst = &DMA[ch].DAR;
 	}
@@ -287,26 +526,26 @@ int FASTCALL DMA_Exec(int ch)
 
 		if ( BusErrFlag ) {
 			switch ( BusErrFlag ) {
-			case 1:					// BusErr/Read
-				if ( DMA[ch].OCR&0x80 )		// Device->Memory
+			case 1:					/* BusErr/Read */
+				if ( DMA[ch].OCR&0x80 )		/* Device->Memory */
 					DMAERR(ch,0x0a)
 				else
 					DMAERR(ch,0x09)
 				break;
-			case 2:					// BusErr/Write
-				if ( DMA[ch].OCR&0x80 )		// Device->Memory
+			case 2:					/* BusErr/Write */
+				if ( DMA[ch].OCR&0x80 )		/* Device->Memory */
 					DMAERR(ch,0x09)
 				else
 					DMAERR(ch,0x0a)
 				break;
-			case 3:					// AdrErr/Read
-				if ( DMA[ch].OCR&0x80 )		// Device->Memory
+			case 3:					/* AdrErr/Read */
+				if ( DMA[ch].OCR&0x80 )		/* Device->Memory */
 					DMAERR(ch,0x06)
 				else
 					DMAERR(ch,0x05)
 				break;
-			case 4:					// BusErr/Write
-				if ( DMA[ch].OCR&0x80 )		// Device->Memory
+			case 4:					/* BusErr/Write */
+				if ( DMA[ch].OCR&0x80 )		/* Device->Memory */
 					DMAERR(ch,0x05)
 				else
 					DMAERR(ch,0x06)
@@ -317,9 +556,9 @@ int FASTCALL DMA_Exec(int ch)
 		}
 
 		DMA[ch].MTC--;
-		if ( !DMA[ch].MTC ) {					// 指定分のバイト数転送終了
-			if ( DMA[ch].OCR&8 ) {				// チェインモードで動いている場合
-				if ( DMA[ch].OCR&4 ) {			// リンクアレイチェイン
+		if ( !DMA[ch].MTC ) {					/* Transfer of specified number of bytes completed */
+			if ( DMA[ch].OCR&8 ) {				/* If running in chained mode */
+				if ( DMA[ch].OCR&4 ) {			/* If running in chained mode */
 					if ( DMA[ch].BAR ) {
 						DMA[ch].MAR = dma_readmem24_dword(DMA[ch].BAR);
 						DMA[ch].MTC = dma_readmem24_word(DMA[ch].BAR+4);
@@ -336,9 +575,9 @@ int FASTCALL DMA_Exec(int ch)
 							break;
 						}
 					}
-				} else {						// アレイチェイン
+				} else {						/* Array chain */
 					DMA[ch].BTC--;
-					if ( DMA[ch].BTC ) {		// 次のブロックがある
+					if ( DMA[ch].BTC ) {		/* Next block exists */
 						DMA[ch].MAR = dma_readmem24_dword(DMA[ch].BAR);
 						DMA[ch].MTC = dma_readmem24_word(DMA[ch].BAR+4);
 						DMA[ch].BAR += 6;
@@ -355,9 +594,9 @@ int FASTCALL DMA_Exec(int ch)
 						}
 					}
 				}
-			} else {								// 通常モード（1ブロックのみ）終了
-				if ( DMA[ch].CCR&0x40 ) {			// Countinuous動作中
-					DMA[ch].CSR |= 0x40;			// ブロック転送終了ビット／割り込み
+			} else {								      /* Normal mode (only one block) finished */
+				if ( DMA[ch].CCR&0x40 ) {			/* Countinuous action */
+					DMA[ch].CSR |= 0x40;			   /* Block transfer end bit/interrupt */
 					DMAINT(ch)
 					if ( DMA[ch].BAR ) {
 						DMA[ch].MAR  = DMA[ch].BAR;
@@ -384,10 +623,6 @@ int FASTCALL DMA_Exec(int ch)
 	return 0;
 }
 
-
-// -----------------------------------------------------------------------
-//   初期化
-// -----------------------------------------------------------------------
 void DMA_Init(void)
 {
 	int i;

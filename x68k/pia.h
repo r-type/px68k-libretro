@@ -1,14 +1,12 @@
-#ifndef _winx68k_pia
-#define _winx68k_pia
+#ifndef _WINX68K_PIA_H
+#define _WINX68K_PIA_H
 
+#include <stdint.h>
 #include "common.h"
 
-extern	BYTE	PIA_PortA;
-extern	BYTE	PIA_PortB;
-extern	BYTE	PIA_PortC;
-
 void PIA_Init(void);
-BYTE FASTCALL PIA_Read(DWORD adr);
-void FASTCALL PIA_Write(DWORD adr, BYTE data);
+uint8_t FASTCALL PIA_Read(uint32_t adr);
+void FASTCALL PIA_Write(uint32_t adr, uint8_t data);
+int PIA_StateAction(StateMem *sm, int load, int data_only);
 
-#endif
+#endif /* _WINX68K_PIA_H */

@@ -10,42 +10,29 @@
 // ---------------------------------------------------------------------------
 //	定数その２
 //	
-#define FM_PI			3.14159265358979323846
+#define FM_PI		3.14159265358979323846f
 
-#define FM_SINEPRESIS	2			// EGとサイン波の精度の差  0(低)-2(高)
+#define FM_SINEPRESIS	2	// EGとサイン波の精度の差  0(低)-2(高)
 
 
 #define FM_OPSINBITS	10
 #define FM_OPSINENTS	(1 << FM_OPSINBITS)
 
-#define FM_EGCBITS		18			// eg の count のシフト値
-#define FM_LFOCBITS		14
+#define FM_EGCBITS	18		// eg の count のシフト値
+#define FM_LFOCBITS	14
 
 #ifdef FM_TUNEBUILD
- #define FM_PGBITS		2
+ #define FM_PGBITS	2
  #define FM_RATIOBITS	0
 #else
- #define FM_PGBITS		9		
+ #define FM_PGBITS	9		
  #define FM_RATIOBITS	7			// 8-12 くらいまで？
 #endif
 
-#define FM_EGBITS		16
-
-//extern int paramcount[];
-//#define PARAMCHANGE(i) paramcount[i]++;
-#define PARAMCHANGE(i)
+#define FM_EGBITS	16
 
 namespace FM
 {
-
-// ---------------------------------------------------------------------------
-//	Operator
-//
-//	フィードバックバッファをクリア
-inline void Operator::ResetFB()
-{
-	out_ = out2_ = 0;
-}
 
 //	キーオン
 inline void Operator::KeyOn()
@@ -53,12 +40,12 @@ inline void Operator::KeyOn()
 	if (!keyon_)
 	{
 		keyon_ = true;
-		if (eg_phase_ == off || eg_phase_ == release)
+		if (eg_phase_ == OFF || eg_phase_ == RELEASE)
 		{
 			ssg_phase_ = -1;
-			ShiftPhase(attack);
+			ShiftPhase(ATTACK);
 			EGUpdate();
-			in2_ = out_ = out2_ = 0;
+			out_ = out2_ = 0;
 			pg_count_ = 0;
 		}
 	}
@@ -70,98 +57,86 @@ inline void	Operator::KeyOff()
 	if (keyon_)
 	{
 		keyon_ = false;
-		ShiftPhase(release);
+		ShiftPhase(RELEASE);
 	}
 }
 
 //	オペレータは稼働中か？
 inline int Operator::IsOn()
 {
-	return eg_phase_ - off;
+	return eg_phase_ - OFF;
 }
 
 //	Detune (0-7)
-inline void Operator::SetDT(uint dt)
+inline void Operator::SetDT(uint32_t dt)
 {
 	detune_ = dt * 0x20, param_changed_ = true;
-	PARAMCHANGE(4);
 }
 
 //	DT2 (0-3)
-inline void Operator::SetDT2(uint dt2)
+inline void Operator::SetDT2(uint32_t dt2)
 {
 	detune2_ = dt2 & 3, param_changed_ = true;
-	PARAMCHANGE(5);
 }
 
 //	Multiple (0-15)
-inline void Operator::SetMULTI(uint mul)	
+inline void Operator::SetMULTI(uint32_t mul)	
 { 
 	multiple_ = mul, param_changed_ = true;
-	PARAMCHANGE(6);
 }
 
 //	Total Level (0-127) (0.75dB step)
-inline void Operator::SetTL(uint tl, bool csm)
+inline void Operator::SetTL(uint32_t tl, bool csm)
 {
 	if (!csm)
-	{
 		tl_ = tl, param_changed_ = true;
-		PARAMCHANGE(7);
-	}
 	tl_latch_ = tl;
 }
 
 //	Attack Rate (0-63)
-inline void Operator::SetAR(uint ar)
+inline void Operator::SetAR(uint32_t ar)
 {
 	ar_ = ar; 
 	param_changed_ = true;
-	PARAMCHANGE(8);
 }
 
 //	Decay Rate (0-63)
-inline void Operator::SetDR(uint dr)
+inline void Operator::SetDR(uint32_t dr)
 { 
 	dr_ = dr; 
 	param_changed_ = true;
-	PARAMCHANGE(9);
 }
 
 //	Sustain Rate (0-63)
-inline void Operator::SetSR(uint sr)		
+inline void Operator::SetSR(uint32_t sr)		
 { 
 	sr_ = sr;
 	param_changed_ = true;
-	PARAMCHANGE(10);
 }
 
 //	Sustain Level (0-127)
-inline void Operator::SetSL(uint sl)		
+inline void Operator::SetSL(uint32_t sl)		
 { 
 	sl_ = sl; 
 	param_changed_ = true;
-	PARAMCHANGE(11);
 }
 
 //	Release Rate (0-63)
-inline void Operator::SetRR(uint rr)		
+inline void Operator::SetRR(uint32_t rr)		
 { 
 	rr_ = rr; 
 	param_changed_ = true;
-	PARAMCHANGE(12);
 }
 
 //	Keyscale (0-3)
-inline void Operator::SetKS(uint ks)		
+inline void Operator::SetKS(uint32_t ks)		
 { 
 	ks_ = ks; 
 	param_changed_ = true; 
-	PARAMCHANGE(13);
 }
 
 //	SSG-type Envelop (0-15)
-inline void Operator::SetSSGEC(uint ssgec)	
+inline void Operator::SetSSGEC(uint32_t ssgec)	
 { 
 	if (ssgec & 8)
 		ssg_type_ = ssgec; 
@@ -173,21 +148,18 @@ inline void Operator::SetAMON(bool amon)
 { 
 	amon_ = amon;  
 	param_changed_ = true;
-	PARAMCHANGE(14);
 }
 
 inline void Operator::Mute(bool mute)
 {
 	mute_ = mute;
 	param_changed_ = true;
-	PARAMCHANGE(15);
 }
 
-inline void Operator::SetMS(uint ms)
+inline void Operator::SetMS(uint32_t ms)
 {
 	ms_ = ms;
 	param_changed_ = true;
-	PARAMCHANGE(16);
 }
 
 // ---------------------------------------------------------------------------
@@ -201,13 +173,13 @@ inline void Channel4::SetType(OpType type)
 }
 
 //	セルフ・フィードバックレートの設定 (0-7)
-inline void Channel4::SetFB(uint feedback)
+inline void Channel4::SetFB(uint32_t feedback)
 {
 	fb = fbtable[feedback];
 }
 
 //	OPNA 系 LFO の設定
-inline void Channel4::SetMS(uint ms)
+inline void Channel4::SetMS(uint32_t ms)
 {
 	op[0].SetMS(ms);
 	op[1].SetMS(ms);
@@ -222,14 +194,6 @@ inline void Channel4::Mute(bool m)
 		op[i].Mute(m);
 }
 
-//	内部パラメータを再計算
-inline void Channel4::Refresh()
-{
-	for (int i=0; i<4; i++)
-		op[i].param_changed_ = true;
-	PARAMCHANGE(3);
-}
-
 inline void Channel4::SetChip(Chip* chip)
 {
 	chip_ = chip;
@@ -237,27 +201,21 @@ inline void Channel4::SetChip(Chip* chip)
 		op[i].SetChip(chip);
 }
 
-// ---------------------------------------------------------------------------
-//
-//
-inline void StoreSample(Sample& dest, ISample data)
+inline void StoreSample(int16_t & dest, ISample data)
 {
-	if (sizeof(Sample) == 2)
-		dest = (Sample) Limit(dest + data, 0x7fff, -0x8000);
-	else
-		dest += data;
+	dest = (int16_t) Limit(dest + data, 0x7fff, -0x8000);
 }
 
 
 // ---------------------------------------------------------------------------
 //	AM のレベルを設定
-inline void Chip::SetAML(uint l)
+inline void Chip::SetAML(uint32_t l)
 {
 	aml_ = l & (FM_LFOENTS - 1);
 }
 
 //	PM のレベルを設定
-inline void Chip::SetPML(uint l)
+inline void Chip::SetPML(uint32_t l)
 {
 	pml_ = l & (FM_LFOENTS - 1);
 }

@@ -1,100 +1,121 @@
-// ---------------------------------------------------------------------------------------
-//  SYSPORT.C - X68k System Port
-// ---------------------------------------------------------------------------------------
+/*
+ *  SYSPORT.C - X68k System Port
+ */
 
 #include "common.h"
 #include "prop.h"
+#include "sram.h"
 #include "sysport.h"
 #include "palette.h"
 
-BYTE	SysPort[7];
-
-// -----------------------------------------------------------------------
-//   初期化
-// -----------------------------------------------------------------------
-void SysPort_Init(void)
+typedef struct
 {
-	int i;
-	for (i=0; i<7; i++) SysPort[i]=0;
-}
+	uint8_t contrast;
+	uint8_t monitor;
+	uint8_t keyctrl;
+	uint8_t cputype;
+} SYSPORT;
 
+static SYSPORT sysport;
 
-// -----------------------------------------------------------------------
-//   らいと
-// -----------------------------------------------------------------------
-void FASTCALL SysPort_Write(DWORD adr, BYTE data)
+int SysPort_StateAction(StateMem *sm, int load, int data_only)
 {
-	switch(adr)
+	SFORMAT StateRegs[] = 
 	{
-	case 0xe8e001:
-		if (SysPort[1]!=(data&15))
-		{
-			SysPort[1] = data & 15;
-			Pal_ChangeContrast(SysPort[1]);
-		}
-		break;
-	case 0xe8e003:
-		SysPort[2] = data & 0x0b;
-		break;
-	case 0xe8e005:
-		SysPort[3] = data & 0x1f;
-		break;
-	case 0xe8e007:
-		SysPort[4] = data & 0x0e;
-		break;
-	case 0xe8e00d:
-		SysPort[5] = data;
-		break;
-	case 0xe8e00f:
-		SysPort[6] = data & 15;
-		break;
-	}
-}
+		SFVAR(sysport.contrast),
+		SFVAR(sysport.monitor),
+		SFVAR(sysport.keyctrl),
+		SFVAR(sysport.cputype),
 
+		SFEND
+	};
 
-// -----------------------------------------------------------------------
-//   りーど
-// -----------------------------------------------------------------------
-BYTE FASTCALL SysPort_Read(DWORD adr)
-{
-	BYTE ret=0xff;
-
-	switch(adr)
-	{
-	case 0xe8e001:
-		ret = SysPort[1];
-		break;
-	case 0xe8e003:
-		ret = SysPort[2];
-		break;
-	case 0xe8e005:
-		ret = SysPort[3];
-		break;
-	case 0xe8e007:
-		ret = SysPort[4];
-		break;
-	case 0xe8e00b:		// 10MHz:0xff、16MHz:0xfe、030(25MHz):0xdcをそれぞれ返すらしい
-		switch(Config.XVIMode)
-		{
-		case 1:			// XVI or RedZone
-		case 2:
-			ret = 0xfe;
-			break;
-		case 3:			// 030
-			ret = 0xdc;
-			break;
-		default:		// 10MHz
-			ret = 0xff;
-			break;
-		}
-		break;
-	case 0xe8e00d:
-		ret = SysPort[5];
-		break;
-	case 0xe8e00f:
-		ret = SysPort[6];
-		break;
-	}
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_SysPort", false);
 
 	return ret;
 }
+
+/* System port #4 ($E8E007) bit 1 = HRL: 0 -> dot clock dividers 1/2,1/3,1/6;
+ * 1 -> 1/2,1/4,1/8 (X68000 programmer's manual). */
+int SysPort_HRL(void)
+{
+	return (sysport.keyctrl >> 1) & 1;
+}
+
+void SysPort_Init(void)
+{
+	static uint8_t cputype[] = {
+		0xff, /* 68000, 10Mhz */
+		0xfe,
+		0xfe, /* 68020, 16Mgz */
+		0xdc  /* 68030, 25Mhz */
+	};
+
+	sysport.contrast = 0;
+	sysport.monitor = 0;
+	sysport.cputype = cputype[Config.XVIMode & 3];
+}
+
+uint8_t FASTCALL SysPort_Read(uint32_t adr)
+{
+	if (adr & 1)
+	{
+		adr &= 0x0f;
+		adr >>= 1;
+
+		switch (adr)
+		{
+		case 0: /* contrast */
+			return (0xf0 | sysport.contrast);
+		case 1: /* b3: monitor control, b0-b1 3d scope */
+			return (0xf0 | sysport.monitor);
+		case 3: /* b3: keyboard connec*ed */
+			return (0xf0 | sysport.keyctrl);
+		case 5:
+			return (0xf0 | sysport.cputype);
+		default:
+			/* unimplemented registers returns 0xff */
+			return 0xff;
+		}
+	}
+
+	return 0xff;
+}
+
+void FASTCALL SysPort_Write(uint32_t adr, uint8_t data)
+{
+	if (adr & 1)
+	{
+		adr &= 0x0f;
+		adr >>= 1;
+
+		switch (adr)
+		{
+		case 0:
+			data &= 0x0f;
+			if (sysport.contrast != data)
+			{
+				sysport.contrast = data;
+				Pal_ChangeContrast(data);
+			}
+			break;
+		case 1:
+			data &= 0x0b;
+			sysport.monitor = data;
+			break;
+		case 3:
+			data &= 0x0e;
+			sysport.keyctrl = data;
+			break;
+		case 6:
+			if (data == 0x31)
+				SRAM_WriteEnable(1);
+			else
+				SRAM_WriteEnable(0);
+			break;
+		default:
+			break;
+		}
+	}
+}
+

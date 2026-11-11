@@ -1,6 +1,6 @@
-// ---------------------------------------------------------------------------------------
-//  SCC.C - Z8530 SCC（マウスのみ）
-// ---------------------------------------------------------------------------------------
+/*
+ *  SCC.C - Z8530 SCC (mouse only)
+ */
 
 #include "common.h"
 #include "scc.h"
@@ -8,48 +8,61 @@
 #include "irqh.h"
 #include "mouse.h"
 
-signed char MouseX = 0;
-signed char MouseY = 0;
-BYTE MouseSt = 0;
+int8_t MouseX = 0;
+int8_t MouseY = 0;
+uint8_t MouseSt = 0;
 
-BYTE SCC_RegsA[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-BYTE SCC_RegNumA = 0;
-BYTE SCC_RegSetA = 0;
-BYTE SCC_RegsB[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-BYTE SCC_RegNumB = 0;
-BYTE SCC_RegSetB = 0;
-BYTE SCC_Vector = 0;
-BYTE SCC_Dat[3] = {0, 0, 0};
-BYTE SCC_DatNum = 0;
+static uint8_t SCC_RegNumA   = 0;
+static uint8_t SCC_RegSetA   = 0;
+static uint8_t SCC_RegsB[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+static uint8_t SCC_RegNumB   = 0;
+static uint8_t SCC_RegSetB   = 0;
+static uint8_t SCC_Vector    = 0;
+static uint8_t SCC_Dat[3]    = {0, 0, 0};
+static uint8_t SCC_DatNum    = 0;
 
-
-// -----------------------------------------------------------------------
-//   わりこみ
-// -----------------------------------------------------------------------
-DWORD FASTCALL SCC_Int(BYTE irq)
+int SCC_StateAction(StateMem *sm, int load, int data_only)
 {
-	DWORD ret = (DWORD)(-1);
-	IRQH_IRQCallBack(irq);
-	if ( (irq==5)&&(!(SCC_RegsB[9]&2)) )
+	SFORMAT StateRegs[] = 
 	{
-		if (SCC_RegsB[9]&1)
-		{
-			if (SCC_RegsB[9]&0x10)
-				ret = ((DWORD)(SCC_Vector&0x8f)+0x20);
-			else
-				ret = ((DWORD)(SCC_Vector&0xf1)+4);
-		}
-		else
-			ret = ((DWORD)SCC_Vector);
-	}
+		SFVAR(MouseX),
+		SFVAR(MouseY),
+		SFVAR(MouseSt),
+
+		SFVAR(SCC_RegNumA),
+		SFVAR(SCC_RegSetA),
+		SFARRAY(SCC_RegsB, 16),
+		SFVAR(SCC_RegNumB),
+		SFVAR(SCC_RegSetB),
+		SFVAR(SCC_Vector),
+		SFARRAY(SCC_Dat, 3),
+		SFVAR(SCC_DatNum),
+
+		SFEND
+	};
+
+	int ret = PX68KSS_StateAction(sm, load, data_only, StateRegs, "X68K_SCC", false);
 
 	return ret;
 }
 
+static uint32_t FASTCALL SCC_Int(uint8_t irq)
+{
+   IRQH_IRQCallBack(irq);
+   if ( (irq==5)&&(!(SCC_RegsB[9]&2)) )
+   {
+      if (SCC_RegsB[9]&1)
+      {
+         if (SCC_RegsB[9]&0x10)
+            return ((uint32_t)(SCC_Vector&0x8f)+0x20);
+         return ((uint32_t)(SCC_Vector&0xf1)+4);
+      }
+      return ((uint32_t)SCC_Vector);
+   }
 
-// -----------------------------------------------------------------------
-//   割り込みのチェック
-// -----------------------------------------------------------------------
+   return (uint32_t)(-1);
+}
+
 void SCC_IntCheck(void)
 {
 	if ( (SCC_DatNum) && ((SCC_RegsB[1]&0x18)==0x10) && (SCC_RegsB[9]&0x08) )
@@ -63,9 +76,6 @@ void SCC_IntCheck(void)
 }
 
 
-// -----------------------------------------------------------------------
-//   初期化
-// -----------------------------------------------------------------------
 void SCC_Init(void)
 {
 	MouseX = 0;
@@ -79,13 +89,10 @@ void SCC_Init(void)
 	SCC_DatNum = 0;
 }
 
-
-// -----------------------------------------------------------------------
-//   I/O Write
-// -----------------------------------------------------------------------
-void FASTCALL SCC_Write(DWORD adr, BYTE data)
+void FASTCALL SCC_Write(uint32_t adr, uint8_t data)
 {
-	if (adr>=0xe98008) return;
+	if (adr>=0xe98008)
+      return;
 
 	if ((adr&7) == 1)
 	{
@@ -93,8 +100,9 @@ void FASTCALL SCC_Write(DWORD adr, BYTE data)
 		{
 			if (SCC_RegNumB == 5)
 			{
-				if ( (!(SCC_RegsB[5]&2))&&(data&2)&&(SCC_RegsB[3]&1)&&(!SCC_DatNum) )	// データが無い時だけにしやう（闇の血族）
-				{			// マウスデータ生成
+				if ( (!(SCC_RegsB[5]&2))&&(data&2)&&(SCC_RegsB[3]&1)
+                  &&(!SCC_DatNum) )	
+				{
 					Mouse_SetData();
 					SCC_DatNum = 3;
 					SCC_Dat[2] = MouseSt;
@@ -102,15 +110,10 @@ void FASTCALL SCC_Write(DWORD adr, BYTE data)
 					SCC_Dat[0] = MouseY;
 				}
 			}
-			else if (SCC_RegNumB == 2) SCC_Vector = data;
+			else if (SCC_RegNumB == 2)
+            SCC_Vector = data;
 			SCC_RegSetB = 0;
 			SCC_RegsB[SCC_RegNumB] = data;
-/*{
-FILE *fp;
-fp=fopen("_scc.txt", "a");
-fprintf(fp, "SCC  Reg[%d] = $%02X  @ $%08X\n", SCC_RegNumB, data, regs.pc);
-fclose(fp);
-}*/
 			SCC_RegNumB = 0;
 		}
 		else
@@ -131,51 +134,42 @@ fclose(fp);
 	else if ((adr&7) == 5)
 	{
 		if (SCC_RegSetA)
-		{
-			SCC_RegSetA = 0;
-			switch (SCC_RegNumA)
-			{
-			case 2:
-				SCC_RegsB[2] = data;
-				SCC_Vector = data;
-				break;
-			case 9:
-				SCC_RegsB[9] = data;
-				break;
-			}
-		}
+      {
+         SCC_RegSetA = 0;
+         switch (SCC_RegNumA)
+         {
+            case 2:
+               SCC_RegsB[2] = data;
+               SCC_Vector   = data;
+               break;
+            case 9:
+               SCC_RegsB[9] = data;
+               break;
+         }
+      }
 		else
-		{
-			data &= 15;
-			if (data)
-			{
-				SCC_RegSetA = 1;
-				SCC_RegNumA = data;
-			}
-			else
-			{
-				SCC_RegSetA = 0;
-				SCC_RegNumA = 0;
-			}
-		}
-	}
-	else if ((adr&7) == 3)
-	{
-	}
-	else if ((adr&7) == 7)
-	{
+      {
+         data &= 15;
+         if (data)
+         {
+            SCC_RegSetA = 1;
+            SCC_RegNumA = data;
+         }
+         else
+         {
+            SCC_RegSetA = 0;
+            SCC_RegNumA = 0;
+         }
+      }
 	}
 }
 
-
-// -----------------------------------------------------------------------
-//   I/O Read
-// -----------------------------------------------------------------------
-BYTE FASTCALL SCC_Read(DWORD adr)
+uint8_t FASTCALL SCC_Read(uint32_t adr)
 {
-	BYTE ret=0;
+	uint8_t ret = 0;
 
-	if (adr>=0xe98008) return ret;
+	if (adr >= 0xe98008)
+      return 0;
 
 	if ((adr&7) == 1)
 	{
@@ -197,7 +191,7 @@ BYTE FASTCALL SCC_Read(DWORD adr)
 		switch(SCC_RegNumA)
 		{
 		case 0:
-			ret = 4;			// 送信バッファ空（Xna）
+			ret = 4;
 			break;
 		case 3:
 			ret = ((SCC_DatNum)?4:0);

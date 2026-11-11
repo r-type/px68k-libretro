@@ -1,13 +1,13 @@
-#ifndef _winx68k_sasi
-#define _winx68k_sasi
+#ifndef _WINX68K_SASI_H
+#define _WINX68K_SASI_H
 
+#include <stdint.h>
 #include "common.h"
 
 void SASI_Init(void);
-BYTE FASTCALL SASI_Read(DWORD adr);
-void FASTCALL SASI_Write(DWORD adr, BYTE data);
+uint8_t FASTCALL SASI_Read(uint32_t adr);
+void FASTCALL SASI_Write(uint32_t adr, uint8_t data);
 int SASI_IsReady(void);
+int SASI_StateAction(StateMem *sm, int load, int data_only);
 
-extern char SASI_Name[16][MAX_PATH];
-
-#endif //_winx68k_sasi
+#endif /* _WINX68K_SASI_H */

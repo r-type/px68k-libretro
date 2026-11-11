@@ -1,23 +1,18 @@
-#ifndef winx68k_common_h
-#define winx68k_common_h
+#ifndef _LIBRETRO_WINX68K_COMMON_H
+#define _LIBRETRO_WINX68K_COMMON_H
 
-#include "windows.h"
-#include <stdio.h>
+#include "compiler.h"
+
 #include <string.h>
 
-#ifdef __APPLE__
-#include "TargetConditionals.h"
-#endif
+#include <libretro.h>
+extern retro_log_printf_t log_cb;
 
-#define	TRUE		1
-#define	FALSE		0
-#define	SUCCESS		0
-#define	FAILURE		1
+#include "state.h"
+#include "state_inline.h"
 
+#undef FASTCALL
 #define FASTCALL
-#define STDCALL
-#define	LABEL
-#define	__stdcall
 
 #ifdef PSP
 #ifdef MAX_PATH
@@ -26,30 +21,4 @@
 #define MAX_PATH 256
 #endif
 
-typedef unsigned char	UINT8;
-typedef unsigned short	UINT16;
-typedef unsigned int	UINT32;
-typedef signed char	INT8;
-typedef signed short	INT16;
-typedef signed int	INT32;
-
-typedef union {
-	struct {
-		BYTE l;
-		BYTE h;
-	} b;
-	WORD w;
-} PAIR;
-
-#ifdef __cplusplus
-extern "C" {
 #endif
-
-void Error(const char* s);
-void p6logd(const char *fmt, ...);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif //winx68k_common_h
